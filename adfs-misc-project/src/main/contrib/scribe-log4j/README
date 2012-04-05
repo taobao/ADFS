@@ -1,0 +1,4 @@
+This contrib package provides an Apache Log4j appender that sends log events
+to a scribe server.
+
+See conf/log4j.properties for how to configure the appender.

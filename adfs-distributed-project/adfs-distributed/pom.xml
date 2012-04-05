@@ -1,0 +1,98 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>com.taobao.adfs</groupId>
+    <artifactId>adfs-project-dist</artifactId>
+    <version>0.2.1</version>
+    <relativePath>../../adfs-project-dist</relativePath>
+  </parent>
+  <groupId>com.taobao.adfs</groupId>
+  <artifactId>adfs-distributed</artifactId>
+  <name>ADFS Distributed Jar</name>
+  <version>0.2.1</version>
+  <description>ADFS Distributed Jar</description>
+  <packaging>jar</packaging>
+
+  <properties>
+    <adfs.component>distributed</adfs.component>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.taobao.adfs</groupId>
+      <artifactId>adfs-common</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.zookeeper</groupId>
+      <artifactId>zookeeper</artifactId>
+      <version>3.3.3</version>
+      <type>jar</type>
+    </dependency>
+    <dependency>
+      <groupId>xmlenc</groupId>
+      <artifactId>xmlenc</artifactId>
+      <version>0.52</version>
+      <type>jar</type>
+    </dependency>
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-log4j12</artifactId>
+      <version>1.5.6</version>
+      <type>jar</type>
+    </dependency>
+    <dependency>
+      <groupId>org.softee</groupId>
+      <artifactId>pojo-mbean</artifactId>
+      <version>1.1</version>
+    </dependency>
+    <dependency>
+      <groupId>com.googlecode.hs4j</groupId>
+      <artifactId>hs4j</artifactId>
+      <version>0.1</version>
+    </dependency>
+    <dependency>
+      <groupId>org.acplt</groupId>
+      <artifactId>oncrpc</artifactId>
+      <version>1.0.7</version>
+    </dependency>
+    <dependency>
+      <groupId>apache-lang</groupId>
+      <artifactId>commons-lang</artifactId>
+      <version>2.1</version>
+      <type>jar</type>
+      <scope>compile</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.sun.tools.btrace</groupId>
+      <artifactId>btrace-client</artifactId>
+      <version>1.2</version>
+      <type>jar</type>
+      <scope>compile</scope>
+    </dependency>
+    <dependency>
+      <groupId>jdbc.mysql</groupId>
+      <artifactId>mysql-connector</artifactId>
+      <version>5.1.5</version>
+      <type>jar</type>
+      <scope>compile</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.hamcrest</groupId>
+      <artifactId>hamcrest-all</artifactId>
+    </dependency>
+
+      <!--for tdhs client-->
+      <dependency>
+          <groupId>org.jboss.netty</groupId>
+          <artifactId>netty</artifactId>
+          <version>3.2.1.Final</version>
+      </dependency>
+      <dependency>
+          <groupId>com.intellij</groupId>
+          <artifactId>annotations</artifactId>
+          <version>8.0</version>
+      </dependency>
+      <!--for tdhs client end-->
+  </dependencies>
+</project>

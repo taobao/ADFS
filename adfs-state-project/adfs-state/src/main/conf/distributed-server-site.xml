@@ -1,0 +1,59 @@
+<?xml version="1.0"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+
+<configuration>
+  <property>
+    <name>distributed.data.class.name</name>
+    <value>com.taobao.adfs.state.internal.StateManagerInternal</value>
+  </property>
+
+  <property>
+    <name>distributed.metrics.address</name>
+    <value>127.0.0.1:8649</value>
+  </property>
+
+  <property>
+    <name>distributed.manager.address</name>
+    <value>127.0.0.1:2181</value>
+  </property>
+
+  <property>
+    <name>distributed.manager.election.delay.time</name>
+    <value>-1</value>
+  </property>
+
+  <property>
+    <name>distributed.data.path</name>
+    <value></value>
+  </property>
+
+  <property>
+    <name>distributed.logger.conf.log4j.appender.DistributedServer.File</name>
+    <value></value>
+  </property>
+
+  <property>
+    <name>distributed.logger.levels</name>
+    <value></value>
+  </property>
+
+  <property>
+    <name>file.cache.capacity</name>
+    <value>0</value>
+  </property>
+
+  <property>
+    <name>database.executor.client.number</name>
+    <value>1</value>
+  </property>
+
+  <property>
+    <name>mysql.server.conf.mysqld.innodb_flush_log_at_trx_commit</name>
+    <value>1</value>
+  </property>
+
+  <property>
+    <name>mysql.server.conf.mysqld.innodb_buffer_pool_size</name>
+    <value>8M</value>
+  </property>
+</configuration>
