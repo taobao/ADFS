@@ -1,0 +1,1 @@
+../../adfs-0.3.0/conf/hadoop-env.sh
