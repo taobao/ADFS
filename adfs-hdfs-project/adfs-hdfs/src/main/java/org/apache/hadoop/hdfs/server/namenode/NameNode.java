@@ -444,7 +444,11 @@ public class NameNode extends DistributedDataBaseOnDatabase implements NamenodeP
     } catch (Exception e) {
       LOG.error(StringUtils.stringifyException(e));
     }
-    if (namesystem != null) namesystem.close();
+    if (namesystem != null) try {
+      namesystem.stopMonitor();
+    } catch (IOException e) {
+      LOG.warn(e);
+    }
     if (emptier != null) emptier.interrupt();
     if (server != null) server.stop();
     if (serviceRpcServer != null) serviceRpcServer.stop();
@@ -453,6 +457,11 @@ public class NameNode extends DistributedDataBaseOnDatabase implements NamenodeP
     }
     if (namesystem != null) {
       namesystem.shutdown();
+    }
+    try {
+      distributedServer.stop();
+    } catch (IOException e) {
+      LOG.warn(e);
     }
   }
 

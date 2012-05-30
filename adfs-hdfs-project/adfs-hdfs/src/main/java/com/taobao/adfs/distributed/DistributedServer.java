@@ -774,7 +774,7 @@ public class DistributedServer implements DistributedInvocable {
     return master;
   }
 
-  void stop() throws IOException {
+  public void stop() throws IOException {
     log(Level.INFO, " is stopping ...");
     editLogger.close(false);
     closeData();
@@ -782,6 +782,7 @@ public class DistributedServer implements DistributedInvocable {
     unregister(serverName);
     if (distributedMetrics != null) distributedMetrics.shutdown();
     log(Level.INFO, " has been stopped");
+    serverType = ServerType.STOP;
   }
 
   public void waitUntilStop() throws IOException {

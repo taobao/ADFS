@@ -281,8 +281,14 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
       initialize(nn, conf);
     } catch (IOException e) {
       LOG.error(getClass().getSimpleName() + " initialization failed.", e);
-      close();
-      throw e;
+      try {
+        stopMonitor();
+        throw e;
+      } catch (Throwable t) {
+        LOG.error(e);
+        LOG.error(t);
+        throw e;
+      }
     }
   }
 
@@ -407,35 +413,6 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
 
   NamespaceInfo getNamespaceInfo() {
     return new NamespaceInfo(0, 0, 0);
-  }
-
-  /**
-   * Close down this file system manager.
-   * Causes heartbeat and lease daemons to stop; waits briefly for
-   * them to finish, but a short timeout returns control back to caller.
-   */
-  public void close() {
-    fsRunning = false;
-    try {
-      if (pendingReplications != null) pendingReplications.stopMonitor();
-      if (hbthread != null) hbthread.interrupt();
-      if (replthread != null) replthread.interrupt();
-      if (dnthread != null) dnthread.interrupt();
-      if (smmthread != null) smmthread.interrupt();
-      if (dtSecretManager != null) dtSecretManager.stopThreads();
-      if (nnrmthread != null) nnrmthread.interrupt();
-    } catch (Exception e) {
-      LOG.warn("Exception shutting down FSNamesystem", e);
-    } finally {
-      // using finally to ensure we also wait for lease daemon
-      try {
-        if (lmthread != null) {
-          lmthread.interrupt();
-          lmthread.join(3000);
-        }
-      } catch (InterruptedException ie) {
-      }
-    }
   }
 
   /** Is this name system running? */

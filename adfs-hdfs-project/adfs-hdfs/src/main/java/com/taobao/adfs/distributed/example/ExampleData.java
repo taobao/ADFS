@@ -178,6 +178,11 @@ public class ExampleData extends DistributedData implements ExampleProtocol {
       id = new Random().nextLong();
     }
 
+    public OperandExample(String content, long id) {
+      this.content = content;
+      this.id = id;
+    }
+    
     @Override
     public Object[] getKey() {
       return new Object[] { id };
