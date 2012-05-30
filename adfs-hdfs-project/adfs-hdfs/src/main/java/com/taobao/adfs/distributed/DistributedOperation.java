@@ -38,7 +38,7 @@ public class DistributedOperation {
   }
 
   public String toString() {
-    return String.valueOf(operator) + ":" + String.valueOf(operand);
+    return String.valueOf(operator) + ":" + String.valueOf(operand) + " id:" + Arrays.toString(operand.getKey());
   }
 
   public OperandKey getKey() {

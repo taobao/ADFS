@@ -29,9 +29,105 @@ public class DistributedOperationQueueTest {
     }
   }
 
+  @Test
+  public void testPutAndGetWithMultiThread() {
+    for(int i = 0; i < 20; i++ ){
+      Thread t = new PutAndGetter(queue);
+      t.setName("thread"+i);
+      t.start();
+      try {
+        t.join();
+      } catch (InterruptedException e) {
+        // TODO Auto-generated catch block
+        e.printStackTrace();
+      }
+    }
+  }
+  
+  static class PutAndGetter extends Thread{
+    DistributedOperationQueue queue;
+    public PutAndGetter(DistributedOperationQueue queue){
+      this.queue = queue;
+    }
+    @Override
+    public void run() {
+      DistributedOperation op;
+      DistributedOperation[] opList;
+      for (int i = 0; i < 10000; i++) {
+        op = generateOpration();
+        queue.add(op);
+        if ((i + 1) % 100 == 0) {
+          System.out.println(Thread.currentThread().getName() + "index " + i + "begin delete");
+          try {
+            Thread.sleep(1);
+          } catch (InterruptedException e) {
+            // TODO Auto-generated catch block
+            e.printStackTrace();
+          }
+          opList = queue.lockAndGetOperations(Thread.currentThread().getId());
+          System.out.println("array length:" + opList.length + " " + Arrays.toString(opList));
+          queue.deleteAndUnlockOperations(Thread.currentThread().getId());
+        }
+      }
+    }
+  }
+  
+  //test when operations of currentThread have previous operations of other thread
+  @Test
+  public void testOperationQueue() throws InterruptedException{
+    Thread t0 = new Getter(queue), t1 =new Getter(queue), t2=new Getter(queue);
+    long tid0 = t0.getId(),tid1 = t1.getId(),tid2=t2.getId();
+    
+    synchronized(queue){
+      queue.addByThreadId(generateOprationById(0), tid0);
+      queue.addByThreadId(generateOprationById(3), tid1);
+      queue.addByThreadId(generateOprationById(2), tid2);
+      queue.addByThreadId(generateOprationById(1), tid0);
+      queue.addByThreadId(generateOprationById(1), tid1);
+      queue.addByThreadId(generateOprationById(1), tid2);
+      queue.addByThreadId(generateOprationById(2), tid1);
+      queue.addByThreadId(generateOprationById(3), tid2);
+    }
+      t0.setName("t0");
+      t1.setName("t1");
+      t2.setName("t2");
+      t0.start();
+      Thread.sleep(5000);
+      t2.start();
+      Thread.sleep(10000);
+      t1.start();
+      t0.join();
+      t1.join();
+      t2.join();
+  }
+  
+  static class Getter extends Thread{
+    DistributedOperationQueue queue;
+    public Getter(DistributedOperationQueue queue){
+      this.queue = queue;
+    }
+    public void run(){
+      DistributedOperation[] operations = queue.lockAndGetOperations(getId());
+      if(getName().equals("t0"))
+        assertTrue("operations.length ==" + operations.length, operations.length == 2);
+      else if(getName().equals("t1"))
+        assertTrue("operations.length ==" + operations.length, operations.length == 1);
+      else if(getName().equals("t2"))
+        assertTrue("operations.length ==" + operations.length, operations.length == 5);
+      System.out.println("threadId" + getId() + "threadName:" + getName() + Arrays.toString(operations));
+      queue.deleteAndUnlockOperations(getId());
+    }
+  }
   public static DistributedOperation generateOpration() {
     Random r = new Random();
     ExampleData.OperandExample f = new ExampleData.OperandExample("contend" + r.nextLong());
+    DistributedOperation op =
+      new DistributedOperation(DistributedOperation.DistributedOperator.values()[r.nextInt(3)], f);
+    return op;
+  }
+  public static DistributedOperation generateOprationById(long id) {
+    Random r = new Random();
+    ExampleData.OperandExample f = new ExampleData.OperandExample("contend" + r.nextLong(),id);
     DistributedOperation op =
       new DistributedOperation(DistributedOperation.DistributedOperator.values()[r.nextInt(3)], f);
     return op;

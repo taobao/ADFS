@@ -3,6 +3,7 @@ package com.taobao.adfs.distributed;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -53,6 +54,10 @@ public class DistributedOperationQueue {
    * get operations in queue by threadId
    */
   public synchronized void add(DistributedOperation distributedOperation) {
+    addByThreadId(distributedOperation, Thread.currentThread().getId());
+  }
+  
+  public synchronized void addByThreadId(DistributedOperation distributedOperation, long threadId) {
     if (!allowAdd) return;
     // add to map(operation's key, operations)
     ArrayList<DistributedOperation> operationListByKey = operationMapByKey.get(distributedOperation.getKey());
@@ -63,10 +68,10 @@ public class DistributedOperationQueue {
     operationListByKey.add(distributedOperation);
 
     // add to map(threadId, operations)
-    ArrayList<DistributedOperation> operationListByThreadId = operationByThreadId.get(Thread.currentThread().getId());
+    ArrayList<DistributedOperation> operationListByThreadId = operationByThreadId.get(threadId);
     if (operationListByThreadId == null) {
       operationListByThreadId = new ArrayList<DistributedOperation>();
-      operationByThreadId.put(Thread.currentThread().getId(), operationListByThreadId);
+      operationByThreadId.put(threadId, operationListByThreadId);
     }
     operationListByThreadId.add(distributedOperation);
   }
@@ -80,11 +85,12 @@ public class DistributedOperationQueue {
     int index = -1;
     DistributedOperation operation = null;
     ArrayList<DistributedOperation> operationListByKey = null;
-    Map<OperandKey, Integer> counter = new HashMap<OperandKey, Integer>();
+    Map<OperandKey, Integer> counter = new LinkedHashMap<OperandKey, Integer>();
     Integer last = -1;
     for (int i = 0, len = operationListByThreadId.size(); i < len; i++) {
       operation = operationListByThreadId.get(i);
       operationListByKey = operationMapByKey.get(operation.getKey());
+      if(operationListByKey==null) continue;
       index = operationListByKey.indexOf(operation);
       last = counter.get(operation.getKey());
       if (last == null || index > last) counter.put(operation.getKey(), index);
@@ -99,7 +105,7 @@ public class DistributedOperationQueue {
   /**
    * lock operation-buckets by operations
    */
-  private void lockBuckets(DistributedOperation... operations) {
+  void lockBuckets(DistributedOperation... operations) {
     Set<OperandKey> keySet = new HashSet<OperandKey>();
     for (DistributedOperation operation : operations) {
       keySet.add(operation.getKey());
