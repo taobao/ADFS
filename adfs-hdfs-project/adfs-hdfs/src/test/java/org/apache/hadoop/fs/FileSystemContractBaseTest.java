@@ -182,10 +182,9 @@ public abstract class FileSystemContractBaseTest extends TestCase {
 
     paths = fs.listStatus(path("/test/hadoop"));
     assertEquals(3, paths.length);
-    // TODO after nnr impl the list sort by name
-    /*assertEquals(path("/test/hadoop/a"), paths[0].getPath());
+    assertEquals(path("/test/hadoop/a"), paths[0].getPath());
     assertEquals(path("/test/hadoop/b"), paths[1].getPath());
-    assertEquals(path("/test/hadoop/c"), paths[2].getPath());*/
+    assertEquals(path("/test/hadoop/c"), paths[2].getPath());
 
     paths = fs.listStatus(path("/test/hadoop/a"));
     assertEquals(0, paths.length);
@@ -218,7 +217,7 @@ public abstract class FileSystemContractBaseTest extends TestCase {
 
     FSDataOutputStream out = fs.create(path, false,
         fs.getConf().getInt("io.file.buffer.size", 4096), 
-        (short) 3, getBlockSize());
+        (short) 1, getBlockSize());
     out.write(data, 0, len);
     out.close();
 
@@ -333,7 +332,7 @@ public abstract class FileSystemContractBaseTest extends TestCase {
     Path src = path("/test/hadoop/file");
     createFile(src);
     Path dst = path("/test/new/newfile");
-    rename(src, dst, true, false, true);
+    rename(src, dst, false, true, false);
   }
 
   public void testRenameFileMoveToExistingDirectory() throws Exception {
@@ -375,7 +374,7 @@ public abstract class FileSystemContractBaseTest extends TestCase {
     Path src = path("/test/hadoop/dir");
     fs.mkdirs(src);
     Path dst = path("/test/new/newdir");
-    rename(src, dst, true, false, true);
+    rename(src, dst, false, true, false);
   }
   
   public void testRenameDirectoryMoveToExistingDirectory() throws Exception {

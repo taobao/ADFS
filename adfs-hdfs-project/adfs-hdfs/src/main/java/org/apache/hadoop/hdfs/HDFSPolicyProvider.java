@@ -22,9 +22,11 @@ import org.apache.hadoop.hdfs.protocol.ClientProtocol;
 import org.apache.hadoop.hdfs.server.protocol.DatanodeProtocol;
 import org.apache.hadoop.hdfs.server.protocol.InterDatanodeProtocol;
 import org.apache.hadoop.hdfs.server.protocol.NamenodeProtocol;
+import org.apache.hadoop.security.RefreshUserMappingsProtocol;
 import org.apache.hadoop.security.authorize.PolicyProvider;
 import org.apache.hadoop.security.authorize.RefreshAuthorizationPolicyProtocol;
 import org.apache.hadoop.security.authorize.Service;
+import org.apache.hadoop.tools.GetUserMappingsProtocol;
 
 /**
  * {@link PolicyProvider} for HDFS protocols.
@@ -41,6 +43,10 @@ public class HDFSPolicyProvider extends PolicyProvider {
     new Service("security.namenode.protocol.acl", NamenodeProtocol.class),
     new Service("security.refresh.policy.protocol.acl", 
                 RefreshAuthorizationPolicyProtocol.class),
+    new Service("security.refresh.usertogroups.mappings.protocol.acl", 
+                RefreshUserMappingsProtocol.class),
+    new Service("security.get.user.mappings.protocol.acl",
+                GetUserMappingsProtocol.class)
   };
   
   @Override

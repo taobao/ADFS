@@ -54,7 +54,12 @@ public class PluginDispatcher<T extends ServicePlugin> {
    */
   public static <X extends ServicePlugin> PluginDispatcher<X> createFromConfiguration(
     Configuration conf, String key, Class<X> clazz) {
-    List<X> plugins = conf.getInstances(key, clazz);
+    List<X> plugins = new ArrayList<X>();
+    try {
+      plugins.addAll(conf.getInstances(key, clazz));
+    } catch (Throwable t) {
+      LOG.warn("Unable to load "+key+" plugins");
+    }
     return new PluginDispatcher<X>(plugins);
   }
 

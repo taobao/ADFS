@@ -1,0 +1,79 @@
+<?xml version="1.0"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+
+<!-- Put site-specific property overrides in this file. -->
+
+<configuration>
+  <property>
+    <name>distributed.logger.levels</name>
+    <value>org.apache.hadoop.hdfs.StateChange=TRACE,org.apache.hadoop.hdfs.DFSClient=TRACE</value>
+  </property>
+
+  <property>
+    <name>dfs.safemode.extension</name>
+    <value>3000</value>
+  </property>
+
+  <property>
+    <name>heartbeat.recheck.interval</name>
+    <value>1000</value>
+  </property>
+
+  <property>
+    <name>dfs.data.dir</name>
+    <value>data</value>
+  </property>
+
+  <property>
+    <name>dfs.datanode.max.xcievers</name>
+    <value>4096</value>
+  </property>
+
+  <property>
+    <name>distributed.server.host</name>
+    <value>127.0.0.1</value>
+  </property>
+
+  <property>
+    <name>distributed.server.port</name>
+    <value>40000</value>
+  </property>
+
+  <property>
+    <name>distributed.manager.address</name>
+    <value>127.0.0.1:2181</value>
+  </property>
+
+  <property>
+    <name>distributed.manager.name2</name>
+    <value>NamenodeDebug</value>
+  </property>
+
+  <property>
+    <name>distributed.manager.election.delay.time</name>
+    <value>1000</value>
+  </property>
+
+  <property>
+    <name>dfs.blockreport.intervalMsec</name>
+    <value>300000</value>
+  </property>
+
+  <property>
+    <name>dfs.datanode.http.address</name>
+    <value>0.0.0.0:50075</value>
+    <description>The datanode http server address and port. If the port is 0 then the server will start on a free port.</description>
+  </property>
+
+  <property>
+    <name>dfs.datanode.ipc.address</name>
+    <value>0.0.0.0:50020</value>
+    <description>The datanode ipc server address and port. If the port is 0 then the server will start on a free port.</description>
+  </property>
+
+  <property>
+    <name>dfs.datanode.address</name>
+    <value>0.0.0.0:50010</value>
+    <description>The address where the datanode server will listen to. If the port is 0 then the server will start on a free port.</description>
+  </property>
+</configuration>

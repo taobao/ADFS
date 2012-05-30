@@ -32,45 +32,37 @@ import org.apache.hadoop.net.Node;
 import org.apache.hadoop.net.NodeBase;
 import org.apache.hadoop.util.StringUtils;
 
-/** 
+/**
  * DatanodeInfo represents the status of a DataNode.
  * This object is used for communication in the
  * Datanode Protocol and the Client Protocol.
  */
 public class DatanodeInfo extends DatanodeID implements Node {
-  public String getLocation() {
-    return location;
-  }
+  public long capacity;
+  public long dfsUsed;
+  public long remaining;
+  public long lastUpdate;
+  public int xceiverCount;
+  public String location = NetworkTopology.DEFAULT_RACK;
 
-  public void setLocation(String location) {
-    this.location = location;
-  }
-
-  public void setDfsUsed(long dfsUsed) {
-    this.dfsUsed = dfsUsed;
-  }
-
-  protected long capacity;
-  protected long dfsUsed;
-  protected long remaining;
-  protected long lastUpdate;
-  protected int xceiverCount;
-  protected String location = NetworkTopology.DEFAULT_RACK;
-
-  /** HostName as suplied by the datanode during registration as its 
+  /**
+   * HostName as suplied by the datanode during registration as its
    * name. Namenode uses datanode IP address as the name.
    */
   protected String hostName = null;
-  
+
   // administrative states of a datanode
-  public enum AdminStates {NORMAL, DECOMMISSION_INPROGRESS, DECOMMISSIONED; }
+  public enum AdminStates {
+    NORMAL, DECOMMISSION_INPROGRESS, DECOMMISSIONED, NORMAL_INPROGRESS, ERROR_INPROGRESS, ERROR, DEAD_INPROGRESS, DEAD;
+  }
+
   protected AdminStates adminState;
 
   public DatanodeInfo() {
     super();
     adminState = null;
   }
-  
+
   public DatanodeInfo(DatanodeInfo from) {
     super(from);
     this.capacity = from.getCapacity();
@@ -90,90 +82,98 @@ public class DatanodeInfo extends DatanodeID implements Node {
     this.remaining = 0L;
     this.lastUpdate = 0L;
     this.xceiverCount = 0;
-    this.adminState = null;    
+    this.adminState = null;
   }
-  
+
   protected DatanodeInfo(DatanodeID nodeID, String location, String hostName) {
     this(nodeID);
     this.location = location;
     this.hostName = hostName;
   }
-  
+
   /** The raw capacity. */
-  public long getCapacity() { return capacity; }
-  
-  /** The used space by the data node. */
-  public long getDfsUsed() { return dfsUsed; }
+  public long getCapacity() {
+    return capacity;
+  }
 
   /** The used space by the data node. */
-  public long getNonDfsUsed() { 
+  public long getDfsUsed() {
+    return dfsUsed;
+  }
+
+  /** The used space by the data node. */
+  public long getNonDfsUsed() {
     long nonDFSUsed = capacity - dfsUsed - remaining;
     return nonDFSUsed < 0 ? 0 : nonDFSUsed;
   }
 
   /** The used space by the data node as percentage of present capacity */
-  public float getDfsUsedPercent() { 
-    if (capacity <= 0) {
-      return 100;
-    }
+  public float getDfsUsedPercent() {
+    if (capacity <= 0) { return 100; }
 
-    return ((float)dfsUsed * 100.0f)/(float)capacity; 
+    return ((float) dfsUsed * 100.0f) / (float) capacity;
   }
 
   /** The raw free space. */
-  public long getRemaining() { return remaining; }
+  public long getRemaining() {
+    return remaining;
+  }
 
   /** The remaining space as percentage of configured capacity. */
-  public float getRemainingPercent() { 
-    if (capacity <= 0) {
-      return 0;
-    }
+  public float getRemainingPercent() {
+    if (capacity <= 0) { return 0; }
 
-    return ((float)remaining * 100.0f)/(float)capacity; 
+    return ((float) remaining * 100.0f) / (float) capacity;
   }
 
   /** The time when this information was accurate. */
-  public long getLastUpdate() { return lastUpdate; }
+  public long getLastUpdate() {
+    return lastUpdate;
+  }
 
   /** number of active connections */
-  public int getXceiverCount() { return xceiverCount; }
+  public int getXceiverCount() {
+    return xceiverCount;
+  }
 
   /** Sets raw capacity. */
-  public void setCapacity(long capacity) { 
-    this.capacity = capacity; 
+  public void setCapacity(long capacity) {
+    this.capacity = capacity;
   }
 
   /** Sets raw free space. */
-  public void setRemaining(long remaining) { 
-    this.remaining = remaining; 
+  public void setRemaining(long remaining) {
+    this.remaining = remaining;
   }
 
   /** Sets time when this information was accurate. */
-  public void setLastUpdate(long lastUpdate) { 
-    this.lastUpdate = lastUpdate; 
+  public void setLastUpdate(long lastUpdate) {
+    this.lastUpdate = lastUpdate;
   }
 
   /** Sets number of active connections */
-  public void setXceiverCount(int xceiverCount) { 
-    this.xceiverCount = xceiverCount; 
+  public void setXceiverCount(int xceiverCount) {
+    this.xceiverCount = xceiverCount;
   }
 
   /** rack name **/
-  public synchronized String getNetworkLocation() {return location;}
-    
+  public synchronized String getNetworkLocation() {
+    return location;
+  }
+
   /** Sets the rack name */
   public synchronized void setNetworkLocation(String location) {
     this.location = NodeBase.normalize(location);
   }
-  
+
   public String getHostName() {
-    return (hostName == null || hostName.length()==0) ? getHost() : hostName;
+    return (hostName == null || hostName.length() == 0) ? getHost() : hostName;
   }
-  
+
   public void setHostName(String host) {
     hostName = host;
   }
-  
+
   /** A formatted string for reporting the status of the DataNode. */
   public String getDatanodeReport() {
     StringBuffer buffer = new StringBuffer();
@@ -184,9 +184,9 @@ public class DatanodeInfo extends DatanodeID implements Node {
     float usedPercent = getDfsUsedPercent();
     float remainingPercent = getRemainingPercent();
 
-    buffer.append("Name: "+name+"\n");
+    buffer.append("Name: " + name + "\n");
     if (!NetworkTopology.DEFAULT_RACK.equals(location)) {
-      buffer.append("Rack: "+location+"\n");
+      buffer.append("Rack: " + location + "\n");
     }
     buffer.append("Decommission Status : ");
     if (isDecommissioned()) {
@@ -196,13 +196,13 @@ public class DatanodeInfo extends DatanodeID implements Node {
     } else {
       buffer.append("Normal\n");
     }
-    buffer.append("Configured Capacity: "+c+" ("+StringUtils.byteDesc(c)+")"+"\n");
-    buffer.append("DFS Used: "+u+" ("+StringUtils.byteDesc(u)+")"+"\n");
-    buffer.append("Non DFS Used: "+nonDFSUsed+" ("+StringUtils.byteDesc(nonDFSUsed)+")"+"\n");
-    buffer.append("DFS Remaining: " +r+ "("+StringUtils.byteDesc(r)+")"+"\n");
-    buffer.append("DFS Used%: "+StringUtils.limitDecimalTo2(usedPercent)+"%\n");
-    buffer.append("DFS Remaining%: "+StringUtils.limitDecimalTo2(remainingPercent)+"%\n");
-    buffer.append("Last contact: "+new Date(lastUpdate)+"\n");
+    buffer.append("Configured Capacity: " + c + " (" + StringUtils.byteDesc(c) + ")" + "\n");
+    buffer.append("DFS Used: " + u + " (" + StringUtils.byteDesc(u) + ")" + "\n");
+    buffer.append("Non DFS Used: " + nonDFSUsed + " (" + StringUtils.byteDesc(nonDFSUsed) + ")" + "\n");
+    buffer.append("DFS Remaining: " + r + "(" + StringUtils.byteDesc(r) + ")" + "\n");
+    buffer.append("DFS Used%: " + StringUtils.limitDecimalTo2(usedPercent) + "%\n");
+    buffer.append("DFS Remaining%: " + StringUtils.limitDecimalTo2(remainingPercent) + "%\n");
+    buffer.append("Last contact: " + new Date(lastUpdate) + "\n");
     return buffer.toString();
   }
 
@@ -214,7 +214,7 @@ public class DatanodeInfo extends DatanodeID implements Node {
     long u = getDfsUsed();
     buffer.append(name);
     if (!NetworkTopology.DEFAULT_RACK.equals(location)) {
-      buffer.append(" "+location);
+      buffer.append(" " + location);
     }
     if (isDecommissioned()) {
       buffer.append(" DD");
@@ -223,10 +223,10 @@ public class DatanodeInfo extends DatanodeID implements Node {
     } else {
       buffer.append(" IN");
     }
-    buffer.append(" " + c + "(" + StringUtils.byteDesc(c)+")");
-    buffer.append(" " + u + "(" + StringUtils.byteDesc(u)+")");
-    buffer.append(" " + StringUtils.limitDecimalTo2(((1.0*u)/c)*100)+"%");
-    buffer.append(" " + r + "(" + StringUtils.byteDesc(r)+")");
+    buffer.append(" " + c + "(" + StringUtils.byteDesc(c) + ")");
+    buffer.append(" " + u + "(" + StringUtils.byteDesc(u) + ")");
+    buffer.append(" " + StringUtils.limitDecimalTo2(((1.0 * u) / c) * 100) + "%");
+    buffer.append(" " + r + "(" + StringUtils.byteDesc(r) + ")");
     buffer.append(" " + new Date(lastUpdate));
     return buffer.toString();
   }
@@ -251,9 +251,7 @@ public class DatanodeInfo extends DatanodeID implements Node {
    * Returns true if the node is in the process of being decommissioned
    */
   public boolean isDecommissionInProgress() {
-    if (adminState == AdminStates.DECOMMISSION_INPROGRESS) {
-      return true;
-    }
+    if (adminState == AdminStates.DECOMMISSION_INPROGRESS) { return true; }
     return false;
   }
 
@@ -261,9 +259,7 @@ public class DatanodeInfo extends DatanodeID implements Node {
    * Returns true if the node has been decommissioned.
    */
   public boolean isDecommissioned() {
-    if (adminState == AdminStates.DECOMMISSIONED) {
-      return true;
-    }
+    if (adminState == AdminStates.DECOMMISSIONED) { return true; }
     return false;
   }
 
@@ -277,54 +273,62 @@ public class DatanodeInfo extends DatanodeID implements Node {
   /**
    * Retrieves the admin state of this node.
    */
-  AdminStates getAdminState() {
-    if (adminState == null) {
-      return AdminStates.NORMAL;
-    }
+  public AdminStates getAdminState() {
+    if (adminState == null) { return AdminStates.NORMAL; }
     return adminState;
   }
 
   /**
    * Sets the admin state of this node.
    */
-  protected void setAdminState(AdminStates newState) {
+  public void setAdminState(AdminStates newState) {
     if (newState == AdminStates.NORMAL) {
       adminState = null;
-    }
-    else {
+    } else {
       adminState = newState;
     }
   }
 
-  private int level; //which level of the tree the node resides
-  private Node parent; //its parent
+  private int level; // which level of the tree the node resides
+  private Node parent; // its parent
 
   /** Return this node's parent */
-  public Node getParent() { return parent; }
-  public void setParent(Node parent) {this.parent = parent;}
-   
-  /** Return this node's level in the tree.
+  public Node getParent() {
+    return parent;
+  }
+
+  public void setParent(Node parent) {
+    this.parent = parent;
+  }
+
+  /**
+   * Return this node's level in the tree.
    * E.g. the root of a tree returns 0 and its children return 1
    */
-  public int getLevel() { return level; }
-  public void setLevel(int level) {this.level = level;}
+  public int getLevel() {
+    return level;
+  }
 
-  /////////////////////////////////////////////////
+  public void setLevel(int level) {
+    this.level = level;
+  }
+
+  // ///////////////////////////////////////////////
   // Writable
-  /////////////////////////////////////////////////
-  static {                                      // register a ctor
-    WritableFactories.setFactory
-      (DatanodeInfo.class,
-       new WritableFactory() {
-         public Writable newInstance() { return new DatanodeInfo(); }
-       });
+  // ///////////////////////////////////////////////
+  static { // register a ctor
+    WritableFactories.setFactory(DatanodeInfo.class, new WritableFactory() {
+      public Writable newInstance() {
+        return new DatanodeInfo();
+      }
+    });
   }
 
   /** {@inheritDoc} */
   public void write(DataOutput out) throws IOException {
     super.write(out);
 
-    //TODO: move it to DatanodeID once DatanodeID is not stored in FSImage
+    // TODO: move it to DatanodeID once DatanodeID is not stored in FSImage
     out.writeShort(ipcPort);
 
     out.writeLong(capacity);
@@ -333,7 +337,7 @@ public class DatanodeInfo extends DatanodeID implements Node {
     out.writeLong(lastUpdate);
     out.writeInt(xceiverCount);
     Text.writeString(out, location);
-    Text.writeString(out, hostName == null? "": hostName);
+    Text.writeString(out, hostName == null ? "" : hostName);
     WritableUtils.writeEnum(out, getAdminState());
   }
 
@@ -341,7 +345,7 @@ public class DatanodeInfo extends DatanodeID implements Node {
   public void readFields(DataInput in) throws IOException {
     super.readFields(in);
 
-    //TODO: move it to DatanodeID once DatanodeID is not stored in FSImage
+    // TODO: move it to DatanodeID once DatanodeID is not stored in FSImage
     this.ipcPort = in.readShort() & 0x0000ffff;
 
     this.capacity = in.readLong();

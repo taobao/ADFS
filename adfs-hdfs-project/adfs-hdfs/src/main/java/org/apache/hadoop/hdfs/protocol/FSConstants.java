@@ -26,9 +26,6 @@ import org.apache.hadoop.conf.Configuration;
 public interface FSConstants {
   public static int MIN_BLOCKS_FOR_WRITE = 5;
 
-  // Chunk the block Invalidate message
-  public static final int BLOCK_INVALIDATE_CHUNK = 1000;
-
   // Long that indicates "leave current quota unchanged"
   public static final long QUOTA_DONT_SET = Long.MAX_VALUE;
   public static final long QUOTA_RESET = -1L;
@@ -80,98 +77,13 @@ public interface FSConstants {
    * URI Scheme for hdfs://namenode/ URIs.
    */
   public static final String HDFS_URI_SCHEME = "hdfs";
-  
-  /**
-   * The policy of looking for and selecting name node
-   * 
-   */
-  public static final String DFS_NAMENODE_SELECTOR = "dfs.namenode.selector";
 
-  /**
-   * The list of name nodes' RPC address list, separated with comma
-   * 
-   */
-  public static final String DFS_NAMENODE_RPCADDR_LIST = "dfs.namenode.rpcaddr.list";
-    
-  /**
-   * 
-   * The home of CorruptReplicasMap in zookeeper
-   */
-  public static final String ZOOKEEPER_CORRUPT_HOME="/namenode/corrupt";
-  
-  /**
-   * 
-   * The home of ExcessReplicationMap in zookeeper 
-   */
-  public static final String ZOOKEEPER_EXCESS_HOME="/namenode/excess";
-  
-  /**
-   * The home of GenerationStamp in zookeeper
-   */
-  public static final String ZOOKEEPER_GENSTAMP_HOME="/namenode/genstamp";
-  
-  /**
-   * 
-   * The home of PendingReplicationMap in zookeeper 
-   */
-  public static final String ZOOKEEPER_PENDING_HOME="/namenode/pending";
-  
-  /**
-   *
-   * The home of ReventInvalidateSets in zookeeper
-   */
-  public static final String ZOOKEEPER_INVALIDATE_HOME="/namenode/invalidate";
-  
-  /**
-   * 
-   * The home of UnderReplicated in zookeeper
-   */
-  public static final String ZOOKEEPER_UNDER_HOME="/namenode/under";
-  
-  /**
-   * 
-   * The home of namenode group in zookeeper using in Namenode.java
-   */
-  public static final String ZOOKEEPER_NAMENODE_GROUP="/namenode/group";
-  
-  /**
-   * 
-   * The home of datanode group in zookeeper 
-   */
-  public static final String ZOOKEEPER_DATANODE_GROUNP="/datanode/group";
-  
-   
-  /**
-   * 
-   * The home of metaChecker in zookeeper
-   */
-  public static final String ZOOKEEPER_METACHECKER_HOME="/metachecker";
-  
-  /**
-   * 
-   * The home of LeaseManager in zookeeper
-   */
-  public static final String ZOOKEEPER_LEASE_HOME="/namenode/lease";
-  
-  
-  /**
-   * 
-   * The home of UnderConstructionFile in zookeeper
-   */
-  public static final String ZOOKEEPER_FILE_HOME="/namenode/file";
-  public static final String ZOOKEEPER_FILELOCK_HOME="/namenode/filelock";
-  
-  
-  /**
-   * The home of Trash in zookeeper
-   */
-  public static final String ZOOKEEPER_TRASH_HOME="/namenode/trash";
-  
   // Version is reflected in the dfs image and edit log files.
   // Version is reflected in the data storage file.
   // Versions are negative.
   // Decrement LAYOUT_VERSION to define a new version.
-  public static final int LAYOUT_VERSION = -18;
+  public static final int LAYOUT_VERSION = -19;
   // Current version: 
-  // Support disk space quotas
+  // -19: added new OP_[GET|RENEW|CANCEL]_DELEGATION_TOKEN and
+  // OP_UPDATE_MASTER_KEY.
 }

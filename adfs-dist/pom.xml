@@ -18,12 +18,10 @@
   <parent>
     <groupId>com.taobao.adfs</groupId>
     <artifactId>adfs-project</artifactId>
-    <version>0.2.1</version>
+    <version>0.3.0</version>
     <relativePath>../adfs-project</relativePath>
   </parent>
-  <groupId>com.taobao.adfs</groupId>
   <artifactId>adfs-dist</artifactId>
-  <version>0.2.1</version>
   <description>ADFS Dist Jar</description>
   <name>ADFS Dist Jar</name>
   <packaging>jar</packaging>
@@ -37,32 +35,7 @@
     </dependency>
     <dependency>
       <groupId>com.taobao.adfs</groupId>
-      <artifactId>adfs-distributed</artifactId>
-      <scope>provided</scope>
-    </dependency>
-    <dependency>
-      <groupId>com.taobao.adfs</groupId>
-      <artifactId>adfs-state</artifactId>
-      <scope>provided</scope>
-    </dependency>
-    <dependency>
-      <groupId>com.taobao.adfs</groupId>
       <artifactId>adfs-hdfs</artifactId>
-      <scope>provided</scope>
-    </dependency>
-    <dependency>
-      <groupId>com.taobao.adfs</groupId>
-      <artifactId>adfs-mapreduce</artifactId>
-      <scope>provided</scope>
-    </dependency>
-    <dependency>
-      <groupId>com.taobao.adfs</groupId>
-      <artifactId>adfs-tools</artifactId>
-      <scope>provided</scope>
-    </dependency>
-    <dependency>
-      <groupId>com.taobao.adfs</groupId>
-      <artifactId>adfs-examples</artifactId>
       <scope>provided</scope>
     </dependency>
   </dependencies>
@@ -127,15 +100,12 @@
                       run mkdir adfs-${project.version}
                       run cd adfs-${project.version}
                       run cp $ROOT/*.txt .
-                      run cp -r $ROOT/adfs-common-project/adfs-common/target/adfs-common-${project.version}/* .
-                      run cp -r $ROOT/adfs-distributed-project/adfs-distributed/target/adfs-distributed-${project.version}/* .
-                      run cp -r $ROOT/adfs-distributed-project/adfs-distributed/src/main/tool .
-                      run cp -r $ROOT/adfs-state-project/adfs-state/target/adfs-state-${project.version}/* .
-                      run cp -r $ROOT/adfs-hdfs-project/adfs-hdfs/target/adfs-hdfs-${project.version}/* .
-                      run cp -r $ROOT/adfs-mapreduce-project/adfs-mapreduce/target/adfs-mapreduce-${project.version}/* .
-                      run cp -r $ROOT/adfs-tools-project/adfs-tools/target/adfs-tools-${project.version}/* .
-                      run cp -r $ROOT/adfs-examples-project/adfs-examples/target/adfs-examples-${project.version}/* .
-                      run cp -r $ROOT/adfs-misc-project/target/adfs-misc-project-${project.version}/* .
+                      run cp -r  $ROOT/adfs-common-project/adfs-common/target/adfs-common-${project.version}/* .
+                      run cp -r  $ROOT/adfs-hdfs-project/adfs-hdfs/target/adfs-hdfs-${project.version}/* .
+                      run rm     modules/*test*.jar
+                      run cp -r  $ROOT/adfs-hdfs-project/adfs-hdfs/target/adfs-hdfs-${project.version}/modules/*test*.jar ./modules
+                      run rm -rf tool
+                      run cp -r  $ROOT/adfs-hdfs-project/adfs-hdfs/src/main/tool ./
                       echo
                       echo "ADFS dist layout available at: ${project.build.directory}/adfs-${project.version}"
                       echo

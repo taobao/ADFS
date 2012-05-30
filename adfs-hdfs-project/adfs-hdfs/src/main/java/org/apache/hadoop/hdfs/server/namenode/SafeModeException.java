@@ -27,8 +27,8 @@ import java.io.IOException;
  */
 public class SafeModeException extends IOException {
 
-  public SafeModeException(String text) {
-    super(text + ". Name node is in safe mode.\n");
+  public SafeModeException(String text, FSNamesystem.SafeModeInfo mode ) {
+    super(text + ". Name node is in safe mode.\n" + mode.getTurnOffTip());
   }
 
 }

@@ -18,10 +18,16 @@
 
 package org.apache.hadoop.hdfs.server.namenode;
 
+import java.io.ByteArrayInputStream;
+import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
+import java.lang.management.ManagementFactory;
+import java.lang.management.MemoryMXBean;
+import java.lang.management.MemoryUsage;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.security.PrivilegedExceptionAction;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -31,32 +37,45 @@ import java.util.TreeSet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.jsp.JspWriter;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hdfs.BlockReader;
 import org.apache.hadoop.hdfs.DFSClient;
+import org.apache.hadoop.hdfs.DFSClient.RemoteBlockReader;
 import org.apache.hadoop.hdfs.protocol.DatanodeID;
 import org.apache.hadoop.hdfs.protocol.DatanodeInfo;
 import org.apache.hadoop.hdfs.protocol.LocatedBlock;
 import org.apache.hadoop.hdfs.protocol.FSConstants.UpgradeAction;
+import org.apache.hadoop.hdfs.security.token.block.BlockTokenIdentifier;
+import org.apache.hadoop.hdfs.security.token.delegation.DelegationTokenIdentifier;
 import org.apache.hadoop.hdfs.server.common.HdfsConstants;
 import org.apache.hadoop.hdfs.server.common.UpgradeStatusReport;
 import org.apache.hadoop.hdfs.server.datanode.DataNode;
+import org.apache.hadoop.hdfs.server.namenode.DatanodeDescriptor;
+import org.apache.hadoop.hdfs.server.namenode.FSNamesystem;
+import org.apache.hadoop.http.HtmlQuoting;
+import org.apache.hadoop.io.Text;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.security.AccessControlException;
+import org.apache.hadoop.security.UserGroupInformation;
+import org.apache.hadoop.security.UserGroupInformation.AuthenticationMethod;
+import org.apache.hadoop.security.token.Token;
 import org.apache.hadoop.util.StringUtils;
+import org.apache.hadoop.util.VersionInfo;
 import org.apache.hadoop.net.NetUtils;
-import org.apache.hadoop.security.*;
 
 public class JspHelper {
+  public static final String CURRENT_CONF = "current.conf";
   final static public String WEB_UGI_PROPERTY_NAME = "dfs.web.ugi";
+  public static final String DELEGATION_PARAMETER_NAME = "delegation";
+  static final String SET_DELEGATION = "&" + DELEGATION_PARAMETER_NAME +
+                                              "=";
+  private static final Log LOG = LogFactory.getLog(JspHelper.class);
 
   static FSNamesystem fsn = null;
   public static InetSocketAddress nameNodeAddr;
-  public static final Configuration conf = new Configuration();
-  public static final UnixUserGroupInformation webUGI
-  = UnixUserGroupInformation.createImmutable(
-      conf.getStrings(WEB_UGI_PROPERTY_NAME));
-
-  public static final int defaultChunkSizeToView = 
-    conf.getInt("dfs.default.chunk.view.size", 32 * 1024);
+  
   static Random rand = new Random();
 
   public JspHelper() {
@@ -67,9 +86,6 @@ public class JspHelper {
     else {
       nameNodeAddr = fsn.getDFSNameNodeAddress(); 
     }      
-
-    UnixUserGroupInformation.saveToConf(conf,
-        UnixUserGroupInformation.UGI_PROPERTY_NAME, webUGI);
   }
 
   public DatanodeID randomNode() throws IOException {
@@ -116,8 +132,11 @@ public class JspHelper {
     return chosenNode;
   }
   public void streamBlockInAscii(InetSocketAddress addr, long blockId, 
-                                 long genStamp, long blockSize, 
-                                 long offsetIntoBlock, long chunkSizeToView, JspWriter out) 
+               Token<BlockTokenIdentifier> accessToken, long genStamp, 
+                                 long blockSize, 
+                                 long offsetIntoBlock, long chunkSizeToView, 
+                                 JspWriter out,
+                                 Configuration conf) 
     throws IOException {
     if (chunkSizeToView == 0) return;
     Socket s = new Socket();
@@ -127,9 +146,9 @@ public class JspHelper {
       long amtToRead = Math.min(chunkSizeToView, blockSize - offsetIntoBlock);     
       
       // Use the block name for file name. 
-      DFSClient.BlockReader blockReader = 
-        DFSClient.BlockReader.newBlockReader(s, addr.toString() + ":" + blockId,
-                                             blockId, genStamp ,offsetIntoBlock, 
+      BlockReader blockReader = 
+        RemoteBlockReader.newBlockReader(s, addr.toString() + ":" + blockId,
+                                             blockId, accessToken, genStamp ,offsetIntoBlock, 
                                              amtToRead, 
                                              conf.getInt("io.file.buffer.size",
                                                          4096));
@@ -153,7 +172,7 @@ public class JspHelper {
     }
     blockReader = null;
     s.close();
-    out.print(new String(buf));
+    out.print(HtmlQuoting.quoteHtmlChars(new String(buf)));
   }
   public void DFSNodesStatus(ArrayList<DatanodeDescriptor> live,
                              ArrayList<DatanodeDescriptor> dead) {
@@ -200,11 +219,14 @@ public class JspHelper {
   }
   
   public String getInodeLimitText() {
-    long inodes = fsn.getDbNodesTotal();
+    long inodes = fsn.getFilesTotal();
     long blocks = fsn.getBlocksTotal();
     long maxobjects = fsn.getMaxObjects();
-    long totalMemory = Runtime.getRuntime().totalMemory();   
-    long maxMemory = Runtime.getRuntime().maxMemory();   
+
+    MemoryMXBean mem = ManagementFactory.getMemoryMXBean();
+    MemoryUsage heap = mem.getHeapMemoryUsage();
+    long totalMemory = heap.getUsed();
+    long maxMemory = heap.getMax();
 
     long used = (totalMemory * 100)/maxMemory;
  
@@ -222,16 +244,7 @@ public class JspHelper {
   }
 
   public String getUpgradeStatusText() {
-    String statusText = "";
-    try {
-      UpgradeStatusReport status = 
-        fsn.distributedUpgradeProgress(UpgradeAction.GET_STATUS);
-      statusText = (status == null ? 
-          "There are no upgrades in progress." :
-            status.getStatusText(false));
-    } catch(IOException e) {
-      statusText = "Upgrade status unknown.";
-    }
+    String statusText = "Upgrade status unknown.";
     return statusText;
   }
 
@@ -317,7 +330,12 @@ public class JspHelper {
           ret = (ddbl < 0) ? -1 : ((ddbl > 0) ? 1 : 0);
           break;
         case FIELD_BLOCKS:
-          ret = d1.numBlocks() - d2.numBlocks();
+          try {
+            ret = d1.numBlocks() - d2.numBlocks();
+          } catch (IOException e) {
+            // TODO Auto-generated catch block
+            e.printStackTrace();
+          }
           break;
         case FIELD_NAME: 
           ret = d1.getHostName().compareTo(d2.getHostName());
@@ -330,19 +348,24 @@ public class JspHelper {
     Collections.sort(nodes, new NodeComapare(field, order));
   }
 
-  public static void printPathWithLinks(String dir, JspWriter out, int namenodeInfoPort ) throws IOException {
+  public static void printPathWithLinks(String dir, JspWriter out, 
+                                        int namenodeInfoPort,
+                                        String tokenString
+                                       ) throws IOException {
     try {
       String[] parts = dir.split(Path.SEPARATOR);
       StringBuilder tempPath = new StringBuilder(dir.length());
       out.print("<a href=\"browseDirectory.jsp" + "?dir="+ Path.SEPARATOR
           + "&namenodeInfoPort=" + namenodeInfoPort
-          + "\">" + Path.SEPARATOR + "</a>");
+          + getDelegationTokenUrlParam(tokenString) + "\">" + Path.SEPARATOR
+          + "</a>");
       tempPath.append(Path.SEPARATOR);
       for (int i = 0; i < parts.length-1; i++) {
         if (!parts[i].equals("")) {
           tempPath.append(parts[i]);
           out.print("<a href=\"browseDirectory.jsp" + "?dir="
-              + tempPath.toString() + "&namenodeInfoPort=" + namenodeInfoPort);
+              + tempPath.toString() + "&namenodeInfoPort=" + namenodeInfoPort
+              + getDelegationTokenUrlParam(tokenString));
           out.print("\">" + parts[i] + "</a>" + Path.SEPARATOR);
           tempPath.append(Path.SEPARATOR);
         }
@@ -356,22 +379,155 @@ public class JspHelper {
     }
   }
 
-  public static void printGotoForm(JspWriter out, int namenodeInfoPort, String file) throws IOException {
+  public static void printGotoForm(JspWriter out,
+                                   int namenodeInfoPort,
+                                   String tokenString,
+                                   String file) throws IOException {
     out.print("<form action=\"browseDirectory.jsp\" method=\"get\" name=\"goto\">");
     out.print("Goto : ");
     out.print("<input name=\"dir\" type=\"text\" width=\"50\" id\"dir\" value=\""+ file+"\">");
     out.print("<input name=\"go\" type=\"submit\" value=\"go\">");
     out.print("<input name=\"namenodeInfoPort\" type=\"hidden\" "
         + "value=\"" + namenodeInfoPort  + "\">");
+    if (UserGroupInformation.isSecurityEnabled()) {
+      out.print("<input name=\"" + DELEGATION_PARAMETER_NAME
+          + "\" type=\"hidden\" value=\"" + tokenString + "\">");
+    }
     out.print("</form>");
   }
   
   public static void createTitle(JspWriter out, 
-      HttpServletRequest req, String  file) throws IOException{
+                                 HttpServletRequest req, 
+                                 String  file) throws IOException{
     if(file == null) file = "";
     int start = Math.max(0,file.length() - 100);
     if(start != 0)
       file = "..." + file.substring(start, file.length());
     out.print("<title>HDFS:" + file + "</title>");
+  }
+
+  
+  /**
+   * If security is turned off, what is the default web user?
+   * @param conf the configuration to look in
+   * @return the remote user that was configuration
+   */
+  public static UserGroupInformation getDefaultWebUser(Configuration conf
+                                                       ) throws IOException {
+    String[] strings = conf.getStrings(JspHelper.WEB_UGI_PROPERTY_NAME);
+    if (strings == null || strings.length == 0) {
+      throw new IOException("Cannot determine UGI from request or conf");
+    }
+    return UserGroupInformation.createRemoteUser(strings[0]);
+  }
+
+  /**
+   * Get {@link UserGroupInformation} and possibly the delegation token out of
+   * the request.
+   * @param request the http request
+   * @return a new user from the request
+   * @throws AccessControlException if the request has no token
+   */
+  public static UserGroupInformation getUGI(HttpServletRequest request,
+                                            Configuration conf
+                                           ) throws IOException {
+    UserGroupInformation ugi = null;
+    if(UserGroupInformation.isSecurityEnabled()) {
+      String user = request.getRemoteUser();
+      String tokenString = request.getParameter(DELEGATION_PARAMETER_NAME);
+      if (tokenString != null) {
+        Token<DelegationTokenIdentifier> token = 
+          new Token<DelegationTokenIdentifier>();
+        token.decodeFromUrlString(tokenString);
+        InetSocketAddress serviceAddr = NameNode.getAddress(conf);
+        LOG.info("Setting service in token: "
+            + new Text(serviceAddr.getAddress().getHostAddress() + ":"
+                + serviceAddr.getPort()));
+        token.setService(new Text(serviceAddr.getAddress().getHostAddress()
+            + ":" + serviceAddr.getPort()));
+        ByteArrayInputStream buf = 
+          new ByteArrayInputStream(token.getIdentifier());
+        DataInputStream in = new DataInputStream(buf);
+        DelegationTokenIdentifier id = new DelegationTokenIdentifier();
+        id.readFields(in);
+        ugi = id.getUser();
+        ugi.addToken(token);        
+        ugi.setAuthenticationMethod(AuthenticationMethod.TOKEN);
+      } else {
+        if(user == null) {
+          throw new IOException("Security enabled but user not " +
+                                "authenticated by filter");
+        }
+        ugi = UserGroupInformation.createRemoteUser(user);
+        // This is not necessarily true, could have been auth'ed by user-facing
+        // filter
+        ugi.setAuthenticationMethod(AuthenticationMethod.KERBEROS_SSL);
+      }
+    } else { // Security's not on, pull from url
+      String user = request.getParameter("ugi");
+      
+      if(user == null) { // not specified in request
+        ugi = getDefaultWebUser(conf);
+      } else {
+        ugi = UserGroupInformation.createRemoteUser(user.split(",")[0]);
+      }
+      ugi.setAuthenticationMethod(AuthenticationMethod.SIMPLE);
+    }
+    
+    if(LOG.isDebugEnabled())
+      LOG.debug("getUGI is returning: " + ugi.getShortUserName());
+    return ugi;
+  }
+
+  public static DFSClient getDFSClient(final UserGroupInformation user,
+                                       final InetSocketAddress addr,
+                                       final Configuration conf
+                                       ) throws IOException,
+                                                InterruptedException {
+    return
+      user.doAs(new PrivilegedExceptionAction<DFSClient>() {
+        public DFSClient run() throws IOException {
+          return new DFSClient(addr, conf);
+        }
+      });
+  }
+  
+  /**
+   * Returns the url parameter for the given token string.
+   * @param tokenString
+   * @return url parameter
+   */
+  public static String getDelegationTokenUrlParam(String tokenString) {
+    if (tokenString == null ) {
+      return "";
+    }
+    if (UserGroupInformation.isSecurityEnabled()) {
+      return SET_DELEGATION + tokenString;
+    } else {
+      return "";
+    }
+  }
+
+   /** Convert a String to chunk-size-to-view. */
+   public static int string2ChunkSizeToView(String s, int defaultValue) {
+     int n = s == null? 0: Integer.parseInt(s);
+     return n > 0? n: defaultValue;
+   }
+
+  /**
+   * Get the default chunk size.
+   * @param conf the configuration
+   * @return the number of bytes to chunk in
+   */
+  public static int getDefaultChunkSize(Configuration conf) {
+    return conf.getInt("dfs.default.chunk.view.size", 32 * 1024);
+  }
+
+  /** Return a table containing version information. */
+  public static String getVersionTable() {
+    return "<div id='dfstable'><table>"       
+        + "\n  <tr><td id='col1'>Version:</td><td>" + VersionInfo.getVersion() + ", " + VersionInfo.getRevision()
+        + "\n  <tr><td id='col1'>Compiled:</td><td>" + VersionInfo.getDate() + " by " + VersionInfo.getUser() + " from " + VersionInfo.getBranch()
+        + "\n</table></div>";
   }
 }

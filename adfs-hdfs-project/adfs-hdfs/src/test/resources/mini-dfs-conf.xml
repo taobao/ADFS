@@ -91,7 +91,7 @@
 
 	<property>                                                                                                        
 		<name>zookeeper.server.list</name>                                                                          
-		<value>127.0.0.1:2181</value>
+		<value>10.232.98.14:2181</value>
 	</property>
 
 	<property>                                                                                                        
@@ -108,7 +108,7 @@
 
 	<property>
     <name>state.server.host</name>
-    <value>127.0.0.1</value>
+    <value>10.232.98.14</value>
   </property>
 
   <property>
@@ -123,7 +123,7 @@
 
   <property>
     <name>state.jdbc.url</name>
-    <value>jdbc:mysql://127.0.0.1:40012</value>
+    <value>jdbc:mysql://10.232.98.14:40012</value>
   </property>
   <property>
     <name>state.jdbc.username</name>
@@ -141,6 +141,6 @@
 
 <property>
   <name>distributed.manager.address</name>
-  <value>127.0.0.1:2181</value>
+  <value>10.232.98.14:2181</value>
 </property>
 </configuration>

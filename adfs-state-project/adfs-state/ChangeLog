@@ -1,5 +1,0 @@
-2011-06-30
-  # NNR-141, add property 'state.database.name' to default-conf.xml
-2011-06-29
-  # NNR-123
-  # NNR-126, BlockmapProtocol.registerDatanodeBy(DatanodeRegistration registration, int datanodeid) -> BlockmapProtocol.registerDatanodeBy(DatanodeRegistration registration)

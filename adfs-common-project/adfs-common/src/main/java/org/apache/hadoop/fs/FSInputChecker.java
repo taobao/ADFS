@@ -148,8 +148,7 @@ abstract public class FSInputChecker extends FSInputStream {
   public synchronized int read(byte[] b, int off, int len) throws IOException {
     // parameter check
     if ((off | len | (off + len) | (b.length - (off + len))) < 0) {
-      throw new IndexOutOfBoundsException("buffer len=" + b.length + 
-          ", off=" + off +", len to read=" + len);
+      throw new IndexOutOfBoundsException();
     } else if (len == 0) {
       return 0;
     }

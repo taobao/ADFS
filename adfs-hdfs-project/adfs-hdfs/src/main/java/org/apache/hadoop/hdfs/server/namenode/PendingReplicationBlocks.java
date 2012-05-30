@@ -26,13 +26,13 @@ import java.sql.Time;
 /***************************************************
  * PendingReplicationBlocks does the bookkeeping of all
  * blocks that are getting replicated.
- *
+ * 
  * It does the following:
- * 1)  record blocks that are getting replicated at this instant.
- * 2)  a coarse grain timer to track age of replication request
- * 3)  a thread that periodically identifies replication-requests
- *     that never made it.
- *
+ * 1) record blocks that are getting replicated at this instant.
+ * 2) a coarse grain timer to track age of replication request
+ * 3) a thread that periodically identifies replication-requests
+ * that never made it.
+ * 
  ***************************************************/
 class PendingReplicationBlocks {
   private Map<Block, PendingBlockInfo> pendingReplications;
@@ -48,7 +48,7 @@ class PendingReplicationBlocks {
   private long defaultRecheckInterval = 5 * 60 * 1000;
 
   PendingReplicationBlocks(long timeoutPeriod) {
-    if ( timeoutPeriod > 0 ) {
+    if (timeoutPeriod > 0) {
       this.timeout = timeoutPeriod;
     }
     init();
@@ -61,8 +61,6 @@ class PendingReplicationBlocks {
   void init() {
     pendingReplications = new HashMap<Block, PendingBlockInfo>();
     timedOutItems = new ArrayList<Block>();
-    this.timerThread = new Daemon(new PendingReplicationMonitor());
-    timerThread.start();
   }
 
   /**
@@ -89,7 +87,7 @@ class PendingReplicationBlocks {
     synchronized (pendingReplications) {
       PendingBlockInfo found = pendingReplications.get(block);
       if (found != null) {
-        NameNode.LOG.debug("Removing pending replication for block" + block);
+        FSNamesystem.LOG.debug("Removing pending replication for block" + block);
         found.decrementReplicas();
         if (found.getNumReplicas() <= 0) {
           pendingReplications.remove(block);
@@ -103,7 +101,7 @@ class PendingReplicationBlocks {
    */
   int size() {
     return pendingReplications.size();
-  } 
+  }
 
   /**
    * How many copies of this block is pending replication?
@@ -111,33 +109,28 @@ class PendingReplicationBlocks {
   int getNumReplicas(Block block) {
     synchronized (pendingReplications) {
       PendingBlockInfo found = pendingReplications.get(block);
-      if (found != null) {
-        return found.getNumReplicas();
-      }
+      if (found != null) { return found.getNumReplicas(); }
     }
     return 0;
   }
 
   /**
-   * Returns a list of blocks that have timed out their 
+   * Returns a list of blocks that have timed out their
    * replication requests. Returns null if no blocks have
    * timed out.
    */
   Block[] getTimedOutBlocks() {
     synchronized (timedOutItems) {
-      if (timedOutItems.size() <= 0) {
-        return null;
-      }
-      Block[] blockList = timedOutItems.toArray(
-                                                new Block[timedOutItems.size()]);
+      if (timedOutItems.size() <= 0) { return null; }
+      Block[] blockList = timedOutItems.toArray(new Block[timedOutItems.size()]);
       timedOutItems.clear();
       return blockList;
     }
   }
 
   /**
-   * An object that contains information about a block that 
-   * is being replicated. It records the timestamp when the 
+   * An object that contains information about a block that
+   * is being replicated. It records the timestamp when the
    * system started replicating the most recent copy of this
    * block. It also records the number of replication
    * requests that are in progress.
@@ -147,7 +140,7 @@ class PendingReplicationBlocks {
     private int numReplicasInProgress;
 
     PendingBlockInfo(int numReplicas) {
-      this.timeStamp = NameNode.now();
+      this.timeStamp = FSNamesystem.now();
       this.numReplicasInProgress = numReplicas;
     }
 
@@ -156,7 +149,7 @@ class PendingReplicationBlocks {
     }
 
     void setTimeStamp() {
-      timeStamp = NameNode.now();
+      timeStamp = FSNamesystem.now();
     }
 
     void incrementReplicas(int increment) {
@@ -165,7 +158,7 @@ class PendingReplicationBlocks {
 
     void decrementReplicas() {
       numReplicasInProgress--;
-      assert(numReplicasInProgress >= 0);
+      assert (numReplicasInProgress >= 0);
     }
 
     int getNumReplicas() {
@@ -182,11 +175,10 @@ class PendingReplicationBlocks {
       while (fsRunning) {
         long period = Math.min(defaultRecheckInterval, timeout);
         try {
-          pendingReplicationCheck();
           Thread.sleep(period);
-        } catch (InterruptedException ie) {
-          NameNode.LOG.debug(
-                "PendingReplicationMonitor thread received exception. " + ie);
+          FSNamesystem.getFSNamesystem().namenode.getClient().pendingReplicationCheck();
+        } catch (Throwable t) {
+          FSNamesystem.LOG.debug("PendingReplicationMonitor thread received exception. " + t);
         }
       }
     }
@@ -194,11 +186,11 @@ class PendingReplicationBlocks {
     /**
      * Iterate through all items and detect timed-out items
      */
-    void pendingReplicationCheck() {
+    public void pendingReplicationCheck() {
       synchronized (pendingReplications) {
         Iterator iter = pendingReplications.entrySet().iterator();
-        long now = NameNode.now();
-        NameNode.LOG.debug("PendingReplicationMonitor checking Q");
+        long now = FSNamesystem.now();
+        FSNamesystem.LOG.debug("PendingReplicationMonitor checking Q");
         while (iter.hasNext()) {
           Map.Entry entry = (Map.Entry) iter.next();
           PendingBlockInfo pendingBlock = (PendingBlockInfo) entry.getValue();
@@ -207,8 +199,7 @@ class PendingReplicationBlocks {
             synchronized (timedOutItems) {
               timedOutItems.add(block);
             }
-            NameNode.LOG.warn(
-                "PendingReplicationMonitor timed out block " + block);
+            FSNamesystem.LOG.warn("PendingReplicationMonitor timed out block " + block);
             iter.remove();
           }
         }
@@ -216,16 +207,31 @@ class PendingReplicationBlocks {
     }
   }
 
+  public void startMonitor() {
+    stopMonitor();
+    this.timerThread = new Daemon(new PendingReplicationMonitor());
+    timerThread.start();
+    fsRunning = true;
+  }
+
+  public PendingReplicationMonitor getMonitor() {
+    if (timerThread == null) return null;
+    return (PendingReplicationMonitor) timerThread.getRunnable();
+  }
+
   /*
    * Shuts down the pending replication monitor thread.
    * Waits for the thread to exit.
    */
-  void stop() {
+  void stopMonitor() {
     fsRunning = false;
-    timerThread.interrupt();
-    try {
-      timerThread.join(3000);
-    } catch (InterruptedException ie) {
+    if (timerThread != null) {
+      timerThread.interrupt();
+      try {
+        timerThread.join(3000);
+      } catch (InterruptedException ie) {
+      }
+      timerThread = null;
     }
   }
 
@@ -234,17 +240,14 @@ class PendingReplicationBlocks {
    */
   void metaSave(PrintWriter out) {
     synchronized (pendingReplications) {
-      out.println("Metasave: Blocks being replicated: " +
-                  pendingReplications.size());
+      out.println("Metasave: Blocks being replicated: " + pendingReplications.size());
       Iterator iter = pendingReplications.entrySet().iterator();
       while (iter.hasNext()) {
         Map.Entry entry = (Map.Entry) iter.next();
         PendingBlockInfo pendingBlock = (PendingBlockInfo) entry.getValue();
         Block block = (Block) entry.getKey();
-        out.println(block + 
-                    " StartTime: " + new Time(pendingBlock.timeStamp) +
-                    " NumReplicaInProgress: " + 
-                    pendingBlock.numReplicasInProgress);
+        out.println(block + " StartTime: " + new Time(pendingBlock.timeStamp) + " NumReplicaInProgress: "
+            + pendingBlock.numReplicasInProgress);
       }
     }
   }

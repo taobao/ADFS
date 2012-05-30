@@ -1,32 +1,30 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with 
-  the License. You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0 Unless required by applicable 
-  law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES 
-  OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and 
-  limitations under the License. See accompanying LICENSE file. -->
+<!--
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License. See accompanying LICENSE file.
+-->
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
   xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
   <modelVersion>4.0.0</modelVersion>
   <parent>
     <groupId>com.taobao.adfs</groupId>
     <artifactId>adfs-project-dist</artifactId>
-    <version>0.2.1</version>
+    <version>0.3.0</version>
     <relativePath>../../adfs-project-dist</relativePath>
   </parent>
-  <groupId>com.taobao.adfs</groupId>
   <artifactId>adfs-hdfs</artifactId>
-  <version>0.2.1</version>
   <description>ADFS HDFS Jar</description>
   <name>ADFS HDFS Jar</name>
   <packaging>jar</packaging>
-
-  <properties>
-    <adfs.component>hdfs</adfs.component>
-    <module.mapred.src>../../adfs-mapreduce-project/adfs-mapreduce/src/main/java/org/apache/hadoop/mapred</module.mapred.src>
-    <module.mapreduce.src>../../adfs-mapreduce-project/adfs-mapreduce/src/main/java/org/apache/hadoop/mapreduce</module.mapreduce.src>
-    <module.mapred.exl>org/apache/hadoop/mapred</module.mapred.exl>
-    <module.mapreduce.exl>org/apache/hadoop/mapreduce</module.mapreduce.exl>
-  </properties>
 
   <dependencies>
     <dependency>
@@ -37,16 +35,6 @@
     <dependency>
       <groupId>com.taobao.adfs</groupId>
       <artifactId>adfs-common</artifactId>
-      <scope>provided</scope>
-    </dependency>
-    <dependency>
-      <groupId>com.taobao.adfs</groupId>
-      <artifactId>adfs-state</artifactId>
-      <scope>provided</scope>
-    </dependency>
-    <dependency>
-      <groupId>com.taobao.adfs</groupId>
-      <artifactId>adfs-distributed</artifactId>
       <scope>provided</scope>
     </dependency>
     <dependency>
@@ -105,7 +93,7 @@
     <dependency>
       <groupId>junit</groupId>
       <artifactId>junit</artifactId>
-      <scope>test</scope>
+      <version>4.8</version>
     </dependency>
     <dependency>
       <groupId>org.slf4j</groupId>
@@ -127,6 +115,60 @@
       <artifactId>ant</artifactId>
       <scope>provided</scope>
     </dependency>
+    <dependency>
+      <groupId>com.googlecode.hs4j</groupId>
+      <artifactId>hs4j</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.sun.tools.btrace</groupId>
+      <artifactId>btrace-client</artifactId>
+      <type>jar</type>
+      <scope>compile</scope>
+    </dependency>
+    <dependency>
+      <groupId>jdbc.mysql</groupId>
+      <artifactId>mysql-connector</artifactId>
+      <version>5.1.5</version>
+      <type>jar</type>
+      <scope>compile</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.hamcrest</groupId>
+      <artifactId>hamcrest-all</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>xmlenc</groupId>
+      <artifactId>xmlenc</artifactId>
+      <version>0.52</version>
+      <type>jar</type>
+    </dependency>
+    <dependency>
+      <groupId>org.softee</groupId>
+      <artifactId>pojo-mbean</artifactId>
+      <version>1.1</version>
+    </dependency>
+    <dependency>
+      <groupId>org.acplt</groupId>
+      <artifactId>oncrpc</artifactId>
+      <version>1.0.7</version>
+    </dependency>
+    <dependency>
+      <groupId>org.acplt</groupId>
+      <artifactId>oncrpc</artifactId>
+      <version>1.0.7</version>
+    </dependency>
+    <!--for tdhs client start-->
+    <dependency>
+      <groupId>org.jboss.netty</groupId>
+      <artifactId>netty</artifactId>
+      <version>3.2.1.Final</version>
+    </dependency>
+    <dependency>
+      <groupId>com.intellij</groupId>
+      <artifactId>annotations</artifactId>
+      <version>8.0</version>
+    </dependency>
+    <!--for tdhs client end-->
   </dependencies>
 
   <build>
@@ -212,6 +254,24 @@
               </sources>
             </configuration>
           </execution>
+          <execution>
+            <id>secondary</id>
+            <phase>generate-sources</phase>
+            <goals>
+              <goal>compile</goal>
+            </goals>
+            <configuration>
+              <compile>false</compile>
+              <workingDirectory>${project.build.directory}/generated-src/main/jsp</workingDirectory>
+              <packageName>org.apache.hadoop.hdfs.server.namenode</packageName>
+              <sources>
+                <directory>${basedir}/src/main/webapps/secondary</directory>
+                <includes>
+                  <include>*.jsp</include>
+                </includes>
+              </sources>
+            </configuration>
+          </execution>
         </executions>
         <dependencies>
           <dependency>
@@ -232,26 +292,6 @@
         </dependencies>
       </plugin>
       <plugin>
-        <groupId>org.codehaus.mojo</groupId>
-        <artifactId>build-helper-maven-plugin</artifactId>
-        <executions>
-          <execution>
-            <id>add-source</id>
-            <phase>generate-sources</phase>
-            <goals>
-              <goal>add-source</goal>
-            </goals>
-            <configuration>
-              <sources>
-                <source>${project.build.directory}/generated-src/main/jsp</source>
-                <source>${module.mapred.src}</source>
-                <source>${module.mapreduce.src}</source>
-              </sources>
-            </configuration>
-          </execution>
-        </executions>
-      </plugin>
-      <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-antrun-plugin</artifactId>
         <executions>
@@ -267,9 +307,11 @@
                   filtering="true" />
                 <copy file="${basedir}/src/main/webapps/datanode-web.xml" tofile="${project.build.directory}/webapps/datanode/WEB-INF/web.xml"
                   filtering="true" />
+                <copy file="${basedir}/src/main/webapps/secondary-web.xml" tofile="${project.build.directory}/webapps/secondary/WEB-INF/web.xml"
+                  filtering="true" />
                 <copy toDir="${project.build.directory}/webapps">
                   <fileset dir="${basedir}/src/main/webapps">
-                    <exclude name="**/*.jsp" />
+                    <exclude name="**/*.jsp" /> 
                     <exclude name="**/*-web.xml" />
                   </fileset>
                 </copy>

@@ -18,25 +18,19 @@
 package org.apache.hadoop.hdfs.server.namenode;
 
 import java.io.IOException;
-import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.SortedMap;
 import java.util.SortedSet;
 import java.util.TreeMap;
 import java.util.TreeSet;
-import java.util.WeakHashMap;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hdfs.protocol.FSConstants;
-import org.apache.hadoop.hdfs.ZKClient;
 
 /**
  * LeaseManager does the lease housekeeping for writing on files.   
@@ -62,128 +56,131 @@ import org.apache.hadoop.hdfs.ZKClient;
  */
 public class LeaseManager {
   public static final Log LOG = LogFactory.getLog(LeaseManager.class);
-  private static final String MONITOR_LOCK_PREFIX = "lockm-";
-  private static final Charset CHARSET = Charset.forName("UTF-8");
-  private static final String SLASH = "/";
-    
+
   private final FSNamesystem fsnamesystem;
-  private final DbLockManager lockManager;
+
   private long softLimit = FSConstants.LEASE_SOFTLIMIT_PERIOD;
   private long hardLimit = FSConstants.LEASE_HARDLIMIT_PERIOD;
-  
-  LeaseManager(FSNamesystem fsnamesystem) throws IOException {
-    this.fsnamesystem = fsnamesystem;
-    this.lockManager = fsnamesystem.lockManager;
-    ZKClient.getInstance().create(FSConstants.ZOOKEEPER_LEASE_HOME, 
-        new byte[0], false, true);
-  }
-  
-  Lease getLease(String holder, boolean loadLeaseFiles) throws IOException {
-    Lease lease = null;
-    if(holder != null) {
-      lease = globalGetLeaseInfo(holder, loadLeaseFiles);
-    }
-    return lease;
-  }
 
-  /** @return the lease containing src 
-   * @throws IOException */
-  public Lease getLeaseById(int fileId) throws IOException {
-    Lease lease = null;
-    String holder = globalFindHolder(fileId);
-    if(holder != null) {
-      lease = getLease(holder, true);
-    }
-    return lease;
-  }
+  //
+  // Used for handling lock-leases
+  // Mapping: leaseHolder -> Lease
+  //
+  private SortedMap<String, Lease> leases = new TreeMap<String, Lease>();
+  // Set of: Lease
+  private SortedSet<Lease> sortedLeases = new TreeSet<Lease>();
 
-  /** @return the number of paths contained in all leases 
-   * @throws IOException */
-  int countPath() throws IOException {
+  // 
+  // Map path names to leases. It is protected by the sortedLeases lock.
+  // The map stores pathnames in lexicographical order.
+  //
+  private SortedMap<String, Lease> sortedLeasesByPath = new TreeMap<String, Lease>();
+
+  LeaseManager(FSNamesystem fsnamesystem) {this.fsnamesystem = fsnamesystem;}
+
+  Lease getLease(String holder) {
+    return leases.get(holder);
+  }
+  
+  SortedSet<Lease> getSortedLeases() {return sortedLeases;}
+
+  /** @return the lease containing src */
+  public Lease getLeaseByPath(String src) {return sortedLeasesByPath.get(src);}
+
+  /** @return the number of leases currently in the system */
+  public synchronized int countLease() {return sortedLeases.size();}
+
+  /** @return the number of paths contained in all leases */
+  synchronized int countPath() {
     int count = 0;
-    List<String> holders = globalGetLeaseClient();
-    if(holders != null) {
-      for(String holder : holders) {
-        List<String> files = globalGetLeaseFiles(holder);
-        if(files != null) {
-          count += files.size();
-        }
-      }
+    for(Lease lease : sortedLeases) {
+      count += lease.getPaths().size();
     }
     return count;
   }
   
   /**
    * Adds (or re-adds) the lease for the specified file.
-   * @throws IOException 
    */
-  Lease addLease(String holder, int fileId) throws IOException {
-    Lease lease = null;
-    lease = globalAddLease(holder, fileId);
+  synchronized Lease addLease(String holder, String src) {
+    Lease lease = getLease(holder);
+    if (lease == null) {
+      lease = new Lease(holder);
+      leases.put(holder, lease);
+      sortedLeases.add(lease);
+    } else {
+      renewLease(lease);
+    }
+    sortedLeasesByPath.put(src, lease);
+    lease.paths.add(src);
     return lease;
   }
 
   /**
-   * Reassign lease for file src to the new holder.
-   * @throws IOException 
+   * Remove the specified lease and src.
    */
-  Lease reassignLease(Lease lease, int fileId, 
-      String newHolder) throws IOException {
+  synchronized void removeLease(Lease lease, String src) {
+    sortedLeasesByPath.remove(src);
+    if (!lease.removePath(src)) {
+      LOG.error(src + " not found in lease.paths (=" + lease.paths + ")");
+    }
+
+    if (!lease.hasPath()) {
+      leases.remove(lease.holder);
+      if (!sortedLeases.remove(lease)) {
+        LOG.error(lease + " not found in sortedLeases");
+      }
+    }
+  }
+
+  /**
+   * Reassign lease for file src to the new holder.
+   */
+  synchronized Lease reassignLease(Lease lease, String src, String newHolder) {
     assert newHolder != null : "new lease holder is null";
     if (lease != null) {
-      removeLease(lease, fileId);
+      removeLease(lease, src);
     }
-    return addLease(newHolder, fileId);
-  }
-  
-  /**
-   * Remove the specified lease and src.
-   * @throws IOException 
-   */
-  void removeLease(Lease lease, int fileId) throws IOException {
-    String holder = lease.holder;
-    removeLease(holder, fileId);
+    return addLease(newHolder, src);
   }
 
   /**
    * Remove the lease for the specified holder and src
-   * @throws IOException 
    */
-  void removeLease(String holder, int fileId) throws IOException {
-     globalRemoveLeaseFile(holder, fileId);
-  }
-  
-  /**
-   * Remove the lease for the specified src
-   * @param fileId
-   * @throws IOException
-   */
-  void removeLease(int fileId) throws IOException {
-    String holder = globalFindHolder(fileId);
-    if(holder != null) {
-      removeLease(holder, fileId);
+  synchronized void removeLease(String holder, String src) {
+    Lease lease = getLease(holder);
+    if (lease != null) {
+      removeLease(lease, src);
     }
   }
-  
+
   /**
-   * Remove the lease for the specified holder with all files
-   * @throws IOException 
+   * Finds the pathname for the specified pendingFile
    */
-  void removeLeases(String holder, List<String> files) throws IOException {
-      globalRemoveLeaseFiles(holder, files);
+  synchronized String findPath(INodeFileUnderConstruction pendingFile
+      ) throws IOException {
+    Lease lease = getLease(pendingFile.clientName);
+    if (lease != null) {
+      String src = lease.findPath(pendingFile);
+      if (src != null) {
+        return src;
+      }
+    }
+    throw new IOException("pendingFile (=" + pendingFile + ") not found."
+        + "(lease=" + lease + ")");
   }
-  
+
   /**
    * Renew the lease(s) held by the given client
    */
-  void renewLease(String holder) throws IOException {
-    renewLease(getLease(holder, false));
+  synchronized void renewLease(String holder) {
+    renewLease(getLease(holder));
   }
-  
-  void renewLease(Lease lease) throws IOException {
+  synchronized void renewLease(Lease lease) {
     if (lease != null) {
+      sortedLeases.remove(lease);
       lease.renew();
-      globalUpdateLeaseInfo((ZkLeaseInfo) lease);
+      sortedLeases.add(lease);
     }
   }
 
@@ -195,53 +192,54 @@ public class LeaseManager {
    * expire, all the corresponding locks can be released.
    *************************************************************/
   class Lease implements Comparable<Lease> {
-    protected String holder;
-    protected long lastUpdate;
-    protected Collection<String> fileIds = new TreeSet<String>();
+    private final String holder;
+    private long lastUpdate;
+    private final Collection<String> paths = new TreeSet<String>();
   
     /** Only LeaseManager object can create a lease */
     private Lease(String holder) {
       this.holder = holder;
       renew();
     }
+
+    /** Get the holder of the lease */
+    public String getHolder() {
+      return holder;
+    }
+
     /** Only LeaseManager object can renew a lease */
-    protected void renew() {
-      this.lastUpdate = NameNode.now();
+    private void renew() {
+      this.lastUpdate = FSNamesystem.now();
     }
 
     /** @return true if the Hard Limit Timer has expired */
     public boolean expiredHardLimit() {
-      return NameNode.now() - lastUpdate > hardLimit;
+      return FSNamesystem.now() - lastUpdate > hardLimit;
     }
 
     /** @return true if the Soft Limit Timer has expired */
     public boolean expiredSoftLimit() {
-      return NameNode.now() - lastUpdate > softLimit;
-    }
-    
-    public String getHolder() {
-      return holder;
+      return FSNamesystem.now() - lastUpdate > softLimit;
     }
 
     /**
      * @return the path associated with the pendingFile and null if not found.
      */
-    private String findFileId(int fileId) {
-      String strFileId = Integer.toString(fileId);
-      if(fileIds.contains(strFileId)) {
-        return strFileId;
-      } else {
-        return null;
-      }
+    private String findPath(INodeFileUnderConstruction pendingFile) {
+      return null;
     }
 
     /** Does this lease contain any path? */
-    boolean hasFiles() {return !fileIds.isEmpty();}
+    boolean hasPath() {return !paths.isEmpty();}
+
+    boolean removePath(String src) {
+      return paths.remove(src);
+    }
 
     /** {@inheritDoc} */
     public String toString() {
       return "[Lease.  Holder: " + holder
-          + ", pendingcreates: " + fileIds + "]";
+          + ", pendingcreates: " + paths.size() + "]";
     }
   
     /** {@inheritDoc} */
@@ -277,9 +275,69 @@ public class LeaseManager {
       return holder.hashCode();
     }
     
-    Collection<String> getFiles() {
-      return fileIds;
+    Collection<String> getPaths() {
+      return paths;
     }
+    
+    void replacePath(String oldpath, String newpath) {
+      paths.remove(oldpath);
+      paths.add(newpath);
+    }
+  }
+
+  synchronized void changeLease(String src, String dst,
+      String overwrite, String replaceBy) {
+    if (LOG.isDebugEnabled()) {
+      LOG.debug(getClass().getSimpleName() + ".changelease: " +
+               " src=" + src + ", dest=" + dst + 
+               ", overwrite=" + overwrite +
+               ", replaceBy=" + replaceBy);
+    }
+
+    final int len = overwrite.length();
+    for(Map.Entry<String, Lease> entry : findLeaseWithPrefixPath(src, sortedLeasesByPath)) {
+      final String oldpath = entry.getKey();
+      final Lease lease = entry.getValue();
+      //overwrite must be a prefix of oldpath
+      final String newpath = replaceBy + oldpath.substring(len);
+      if (LOG.isDebugEnabled()) {
+        LOG.debug("changeLease: replacing " + oldpath + " with " + newpath);
+      }
+      lease.replacePath(oldpath, newpath);
+      sortedLeasesByPath.remove(oldpath);
+      sortedLeasesByPath.put(newpath, lease);
+    }
+  }
+
+  synchronized void removeLeaseWithPrefixPath(String prefix) {
+    for(Map.Entry<String, Lease> entry : findLeaseWithPrefixPath(prefix, sortedLeasesByPath)) {
+      if (LOG.isDebugEnabled()) {
+        LOG.debug(LeaseManager.class.getSimpleName()
+            + ".removeLeaseWithPrefixPath: entry=" + entry);
+      }
+      removeLease(entry.getValue(), entry.getKey());    
+    }
+  }
+
+  static private List<Map.Entry<String, Lease>> findLeaseWithPrefixPath(
+      String prefix, SortedMap<String, Lease> path2lease) {
+    if (LOG.isDebugEnabled()) {
+      LOG.debug(LeaseManager.class.getSimpleName() + ".findLease: prefix=" + prefix);
+    }
+
+    List<Map.Entry<String, Lease>> entries = new ArrayList<Map.Entry<String, Lease>>();
+    final int srclen = prefix.length();
+
+    for(Map.Entry<String, Lease> entry : path2lease.tailMap(prefix).entrySet()) {
+      final String p = entry.getKey();
+      if (!p.startsWith(prefix)) {
+        return entries;
+      }
+      if (p.length() == srclen || p.charAt(srclen) == Path.SEPARATOR_CHAR) {
+        entries.add(entry);
+      }
+    }
+    return entries;
   }
 
   public void setLeasePeriod(long softLimit, long hardLimit) {
@@ -294,26 +352,16 @@ public class LeaseManager {
   class Monitor implements Runnable {
     final String name = getClass().getSimpleName();
 
-    
     /** Check leases periodically. */
     public void run() {
-      for (; fsnamesystem.isRunning();) {
-        try {
-          if (lockManager.trylockLeaseMonitor()) {
-            try {
-              checkLeases();
-            } catch(IOException ioe) {
-              LOG.error("LeaseManager's monitor IO exception", ioe);
-            } finally {
-              lockManager.unlockLeaseMonitor();
-            }
-          }
-        } catch (Exception e) {
-          LOG.error("Lease Manager Monitor got exception...", e);
+      for(; fsnamesystem.isRunning(); ) {
+        synchronized(fsnamesystem) {
+          checkLeases();
         }
+
         try {
           Thread.sleep(2000);
-        } catch (InterruptedException ie) {
+        } catch(InterruptedException ie) {
           if (LOG.isDebugEnabled()) {
             LOG.debug(name + " is interrupted", ie);
           }
@@ -322,11 +370,9 @@ public class LeaseManager {
     }
   }
 
-  /** Check the leases beginning from the oldest. 
-   * @throws IOException */
-  void checkLeases() throws IOException {
-    SortedSet<Lease> sortedLeases;
-    while((sortedLeases = globalGetLeases()).size() > 0) {
+  /** Check the leases beginning from the oldest. */
+  synchronized void checkLeases() {
+    for(; sortedLeases.size() > 0; ) {
       final Lease oldest = sortedLeases.first();
       if (!oldest.expiredHardLimit()) {
         return;
@@ -335,194 +381,33 @@ public class LeaseManager {
       LOG.info("Lease " + oldest + " has expired hard limit");
 
       final List<String> removing = new ArrayList<String>();
-      /* cause we get collection remotely and don't need to 
-       * worry about ConcurrentModifyException*/
-      Collection<String> oldestFiles = oldest.getFiles();
-      if(oldestFiles != null) {
-        for(String p : oldestFiles) {
-          try {
-            fsnamesystem.internalReleaseLeaseOne(oldest, Integer.parseInt(p));
-          } catch (IOException e) {
-            LOG.error("Cannot release the path "+p+" in the lease "+oldest, e);
-            removing.add(p);
-          }
+      // need to create a copy of the oldest lease paths, becuase 
+      // internalReleaseLease() removes paths corresponding to empty files,
+      // i.e. it needs to modify the collection being iterated over
+      // causing ConcurrentModificationException
+      String[] leasePaths = new String[oldest.getPaths().size()];
+      oldest.getPaths().toArray(leasePaths);
+      for(String p : leasePaths) {
+        try {
+          throw new IOException("TODO: fsnamesystem.internalReleaseLeaseOne(oldest, p)");
+        } catch (IOException e) {
+          LOG.error("Cannot release the path "+p+" in the lease "+oldest, e);
+          removing.add(p);
         }
       }
 
-
-      // remove the client node and all its files
-      removeLeases(oldest.holder, removing);
+      for(String p : removing) {
+        removeLease(oldest, p);
+      }
     }
   }
 
   /** {@inheritDoc} */
-  public String toString() {
-    return getClass().getSimpleName();
-  }
-  
-  /* ----- Global related operations on ZooKeeper  ----- */
-  
-  /**
-   * return the namenode address requesting the lease
-   */
-  public ZkLeaseInfo globalGetLeaseInfo(String holder, boolean loadLeaseFiles) throws IOException {
-    String node = buildLeaseInfoPath(holder);
-    byte[] data = ZKClient.getInstance().getData(node, null);
-    if(data == null) {
-      return null; // doesn't exist
-    } else {
-      ZkLeaseInfo li = new ZkLeaseInfo(data, loadLeaseFiles);
-      return li;
-    }
-  }
-  
-  private Lease globalAddLease(String holder, int fileId) throws IOException {
-    String node = buildLeaseInfoPath(holder);
-    byte[] data = ZKClient.getInstance().getData(node, null);
-    ZkLeaseInfo li = null;
-    if(data == null) {
-      // doesn't exist lease info node, then create
-      li = new ZkLeaseInfo(holder);
-      ZKClient.getInstance().create(node, li.toByteArray(), false, false);
-    } else {
-      // existed, then update lastUpdate value, don't load lease files
-      li = new ZkLeaseInfo(data, false); // super will renew lastUpdate value
-      ZKClient.getInstance().setData(node, li.toByteArray());
-    }
-    // now, we can add the lease file node
-    globalAddLeaseFile(holder, fileId);
-    // It's safe not to load lease files here for performance boost
-    // li.loadLeaseFiles();
-    return li;
-  }
-  
-  private void globalRemoveLeaseFile(String holder, int fileId) throws IOException {
-    String node = buildLeaseFilePath(holder, fileId);
-    ZKClient.getInstance().delete(node, true);
-  }
-  
-  private void globalRemoveLeaseFiles(String holder, List<String> files) throws IOException {
-    String node = buildLeaseInfoPath(holder);
-    if(files != null) {
-      StringBuilder sb = new StringBuilder();
-      for(String file : files) {
-        sb.delete(0, sb.length());
-        sb.append(node).append(SLASH).append(file);
-        ZKClient.getInstance().delete(sb.toString(), true);
-      }
-    }
-    ZKClient.getInstance().delete(node, false);
-  }
-  
-  
-  private void globalUpdateLeaseInfo(ZkLeaseInfo li) throws IOException {
-    String node = buildLeaseInfoPath(li.holder);
-    ZKClient.getInstance().setData(node, li.toByteArray());
-  }
-  
-  private List<String> globalGetLeaseClient() throws IOException {
-    List<String> ret = new ArrayList<String>();
-    List<String> holders = ZKClient.getInstance().getChildren(
-        FSConstants.ZOOKEEPER_LEASE_HOME, null);
-    if (holders != null) {
-      for (String holder : holders) {
-        if (holder != null
-            && !holder.startsWith(MONITOR_LOCK_PREFIX)) {
-          ret.add(holder);
-        }
-      }
-    }
-    return ret;
-  }
-  
-  private List<String> globalGetLeaseFiles(String holder) throws IOException {
-    String node = buildLeaseInfoPath(holder);
-    return ZKClient.getInstance().getChildren(node, null);
-  }
-  
-  private void globalAddLeaseFile(String holder, int fileId) throws IOException {
-    String node = buildLeaseFilePath(holder, fileId);
-    ZKClient.getInstance().create(node, new byte[0], false, false);
-  }
-  
-  private String globalFindHolder(int fileId) throws IOException {
-    String path = buildFilePath(fileId);
-    byte[] data = ZKClient.getInstance().getData(path, null);
-    if(data == null) {
-      // pending file doesn't exist
-      return null; 
-    } else {
-      String strData = new String(data, CHARSET);
-      String[] datas = strData.split(DbNodePendingFile.SEPARATOR);
-      return datas[0]; // it is the client name
-    }
-  }
-  
-  private SortedSet<Lease> globalGetLeases() throws IOException {
-    SortedSet<Lease> sortedLeases = new TreeSet<Lease>();
-    List<String> clients = globalGetLeaseClient();
-    if(clients != null) {
-      for(String client : clients) {
-        ZkLeaseInfo li = globalGetLeaseInfo(client, true);
-        if(li != null) {
-          sortedLeases.add(li);
-        }
-      }
-    }
-    return sortedLeases;
-  }
-  
-  private String buildLeaseInfoPath(String holder) {
-    StringBuilder sb = new StringBuilder(FSConstants.ZOOKEEPER_LEASE_HOME);
-    sb.append(SLASH).append(holder);
-    return sb.toString();
-  }
-  
-  private String buildLeaseFilePath(String holder, int fileId) {
-    StringBuilder sb = new StringBuilder(FSConstants.ZOOKEEPER_LEASE_HOME);
-    sb.append(SLASH).append(holder).append(SLASH).append(fileId);
-    return sb.toString();
-  }
-  
-  private String buildFilePath(int fileId) {
-    StringBuilder sb = new StringBuilder(FSConstants.ZOOKEEPER_FILE_HOME);
-    sb.append(SLASH).append(fileId);
-    return sb.toString();    
-  }
-  
-  class ZkLeaseInfo extends Lease {
-    
-    private static final String SEPARATOR = ";";
-    
-    private ZkLeaseInfo(byte[] data, boolean loadLeaseFiles) throws IOException {
-      super(null);
-      set(data);
-      if(loadLeaseFiles) {
-        loadLeaseFiles();
-      }
-    }
-    
-    private ZkLeaseInfo(String clientName) {
-      super(clientName);
-    }
-    
-    private void set(byte[] data) {
-      String strData = new String(data, CHARSET);
-      String[] datas = strData.split(SEPARATOR);
-      holder = datas[0];
-      lastUpdate = Long.parseLong(datas[1]);
-      strData = null;
-    }
-    
-    private void loadLeaseFiles() throws IOException {
-      fileIds.addAll(globalGetLeaseFiles(holder));
-    }
-    
-    private byte[] toByteArray() {
-      StringBuilder sb = new StringBuilder();
-      sb.append(holder)
-        .append(SEPARATOR).append(lastUpdate);
-      return sb.toString().getBytes(CHARSET);
-    }
+  public synchronized String toString() {
+    return getClass().getSimpleName() + "= {"
+        + "\n leases=" + leases
+        + "\n sortedLeases=" + sortedLeases
+        + "\n sortedLeasesByPath=" + sortedLeasesByPath
+        + "\n}";
   }
 }

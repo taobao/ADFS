@@ -23,18 +23,18 @@ import org.apache.hadoop.hdfs.server.common.GenerationStamp;
 import org.apache.hadoop.io.*;
 
 /**************************************************
- * A Block is a Hadoop FS primitive, identified by a 
+ * A Block is a Hadoop FS primitive, identified by a
  * long.
- *
+ * 
  **************************************************/
 public class Block implements Writable, Comparable<Block> {
 
-  static {                                      // register a ctor
-    WritableFactories.setFactory
-      (Block.class,
-       new WritableFactory() {
-         public Writable newInstance() { return new Block(); }
-       });
+  static { // register a ctor
+    WritableFactories.setFactory(Block.class, new WritableFactory() {
+      public Writable newInstance() {
+        return new Block();
+      }
+    });
   }
 
   // generation stamp of blocks that pre-date the introduction of
@@ -45,8 +45,7 @@ public class Block implements Writable, Comparable<Block> {
    */
   public static boolean isBlockFilename(File f) {
     String name = f.getName();
-    if ( name.startsWith( "blk_" ) && 
-        name.indexOf( '.' ) < 0 ) {
+    if (name.startsWith("blk_") && name.indexOf('.') < 0) {
       return true;
     } else {
       return false;
@@ -57,19 +56,39 @@ public class Block implements Writable, Comparable<Block> {
     return Long.parseLong(name.substring("blk_".length()));
   }
 
+  private long datanodeId;
   private long blockId;
   private long numBytes;
   private long generationStamp;
 
-  public Block() {this(0, 0, 0);}
+  public Block() {
+    this(0, 0, 0);
+  }
+
+  public Block(final long blkid, final long len, final long generationStamp, long datanodeId) {
+    set(blkid, len, generationStamp);
+    this.datanodeId = datanodeId;
+  }
 
   public Block(final long blkid, final long len, final long generationStamp) {
     set(blkid, len, generationStamp);
   }
 
-  public Block(final long blkid) {this(blkid, 0, GenerationStamp.WILDCARD_STAMP);}
+  public Block(final long blkid) {
+    this(blkid, 0, GenerationStamp.WILDCARD_STAMP);
+  }
 
-  public Block(Block blk) {this(blk.blockId, blk.numBytes, blk.generationStamp);}
+  public Block(Block blk) {
+    this(blk.blockId, blk.numBytes, blk.generationStamp);
+  }
+
+  public Block(Block blk, long datanodeId) {
+    this(blk.blockId, blk.numBytes, blk.generationStamp, datanodeId);
+  }
+
+  public Block(com.taobao.adfs.block.Block blk) {
+    this(blk.id, blk.length, blk.generationStamp, blk.datanodeId);
+  }
 
   /**
    * Find the blockid from the given filename
@@ -83,12 +102,21 @@ public class Block implements Writable, Comparable<Block> {
     this.numBytes = len;
     this.generationStamp = genStamp;
   }
+
+  public long getDatanodeId() {
+    return datanodeId;
+  }
+
+  public long setDatanodeId(long datanodeId) {
+    return this.datanodeId = datanodeId;
+  }
+
   /**
    */
   public long getBlockId() {
     return blockId;
   }
-  
+
   public void setBlockId(long bid) {
     blockId = bid;
   }
@@ -104,6 +132,7 @@ public class Block implements Writable, Comparable<Block> {
   public long getNumBytes() {
     return numBytes;
   }
+
   public void setNumBytes(long len) {
     this.numBytes = len;
   }
@@ -111,20 +140,24 @@ public class Block implements Writable, Comparable<Block> {
   public long getGenerationStamp() {
     return generationStamp;
   }
-  
+
   public void setGenerationStamp(long stamp) {
     generationStamp = stamp;
+  }
+
+  public Block getWithWildcardGS() {
+    return new Block(blockId, numBytes, GenerationStamp.WILDCARD_STAMP);
   }
 
   /**
    */
   public String toString() {
-    return getBlockName() + "_" + getGenerationStamp();
+    return getBlockName() + "_" + getNumBytes() + "_" + getGenerationStamp();
   }
 
-  /////////////////////////////////////
+  // ///////////////////////////////////
   // Writable
-  /////////////////////////////////////
+  // ///////////////////////////////////
   public void write(DataOutput out) throws IOException {
     out.writeLong(blockId);
     out.writeLong(numBytes);
@@ -135,24 +168,20 @@ public class Block implements Writable, Comparable<Block> {
     this.blockId = in.readLong();
     this.numBytes = in.readLong();
     this.generationStamp = in.readLong();
-    if (numBytes < 0) {
-      throw new IOException("Unexpected block size: " + numBytes);
-    }
+    if (numBytes < 0) { throw new IOException("Unexpected block size: " + numBytes); }
   }
 
-  /////////////////////////////////////
+  // ///////////////////////////////////
   // Comparable
-  /////////////////////////////////////
+  // ///////////////////////////////////
   static void validateGenerationStamp(long generationstamp) {
-    if (generationstamp == GenerationStamp.WILDCARD_STAMP) {
-      throw new IllegalStateException("generationStamp (=" + generationstamp
-          + ") == GenerationStamp.WILDCARD_STAMP");
-    }    
+    if (generationstamp == GenerationStamp.WILDCARD_STAMP) { throw new IllegalStateException("generationStamp (="
+        + generationstamp + ") == GenerationStamp.WILDCARD_STAMP"); }
   }
 
   /** {@inheritDoc} */
   public int compareTo(Block b) {
-    //Wildcard generationStamp is NOT ALLOWED here
+    // Wildcard generationStamp is NOT ALLOWED here
     validateGenerationStamp(this.generationStamp);
     validateGenerationStamp(b.generationStamp);
 
@@ -167,19 +196,16 @@ public class Block implements Writable, Comparable<Block> {
 
   /** {@inheritDoc} */
   public boolean equals(Object o) {
-    if (!(o instanceof Block)) {
-      return false;
-    }
-    final Block that = (Block)o;
-    //Wildcard generationStamp is ALLOWED here
+    if (!(o instanceof Block)) { return false; }
+    final Block that = (Block) o;
+    // Wildcard generationStamp is ALLOWED here
     return this.blockId == that.blockId
-      && GenerationStamp.equalsWithWildcard(
-          this.generationStamp, that.generationStamp);
+        && GenerationStamp.equalsWithWildcard(this.generationStamp, that.generationStamp);
   }
 
   /** {@inheritDoc} */
   public int hashCode() {
-    //GenerationStamp is IRRELEVANT and should not be used here
-    return 37 * 17 + (int) (blockId^(blockId>>>32));
+    // GenerationStamp is IRRELEVANT and should not be used here
+    return 37 * 17 + (int) (blockId ^ (blockId >>> 32));
   }
 }

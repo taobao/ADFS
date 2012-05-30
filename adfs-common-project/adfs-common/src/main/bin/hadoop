@@ -27,6 +27,7 @@ function print_usage(){
   echo "Usage: hadoop [--config confdir] COMMAND"
   echo "       where COMMAND is one of:"
   echo "  fs                   run a generic filesystem user client"
+  echo "  ds                   run a distributed shell"
   echo "  version              print the version"
   echo "  jar <jar>            run a jar file"
   echo "  distcp <srcurl> <desturl> copy file or directories recursively"
@@ -76,6 +77,9 @@ case $COMMAND in
     # the core commands
     if [ "$COMMAND" = "fs" ] ; then
       CLASS=org.apache.hadoop.fs.FsShell
+      HADOOP_OPTS="$HADOOP_OPTS $HADOOP_CLIENT_OPTS"
+    elif [ "$COMMAND" = "ds" ] ; then
+      CLASS=com.taobao.adfs.distributed.DistributedShell
       HADOOP_OPTS="$HADOOP_OPTS $HADOOP_CLIENT_OPTS"
     elif [ "$COMMAND" = "version" ] ; then
       CLASS=org.apache.hadoop.util.VersionInfo

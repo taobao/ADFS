@@ -1,5 +1,6 @@
 <%@ page
-contentType="text/html; charset=UTF-8"
+    contentType="text/html; charset=UTF-8"
+    isThreadSafe="false"
 	import="javax.servlet.*"
 	import="javax.servlet.http.*"
 	import="java.io.*"
@@ -48,6 +49,45 @@ String NodeHeaderStr(String name) {
 
 	return ret;
 }
+
+void generateDecommissioningNodeData(JspWriter out, DatanodeDescriptor d,
+      String suffix, boolean alive, int nnHttpPort) throws IOException {
+    String url = "http://" + d.getHostName() + ":" + d.getInfoPort()
+      + "/browseDirectory.jsp?namenodeInfoPort=" + nnHttpPort + "&dir="
+      + URLEncoder.encode("/", "UTF-8");
+
+    String name = d.getHostName() + ":" + d.getPort();
+    if (!name.matches("\\d+\\.\\d+.\\d+\\.\\d+.*"))
+      name = name.replaceAll("\\.[^.:]*", "");
+    int idx = (suffix != null && name.endsWith(suffix)) ? name
+        .indexOf(suffix) : -1;
+
+    out.print(rowTxt() + "<td class=\"name\"><a title=\"" + d.getHost() + ":"
+        + d.getPort() + "\" href=\"" + url + "\">"
+        + ((idx > 0) ? name.substring(0, idx) : name) + "</a>"
+        + ((alive) ? "" : "\n"));
+      if (!alive) {
+        return;
+      }
+
+    long decommRequestTime = d.decommissioningStatus.getStartTime();
+    long timestamp = d.getLastUpdate();
+    long currentTime = System.currentTimeMillis();
+    long hoursSinceDecommStarted = (currentTime - decommRequestTime)/3600000;
+    long remainderMinutes = ((currentTime - decommRequestTime)/60000) % 60;
+    out.print("<td class=\"lastcontact\"> "
+        + ((currentTime - timestamp) / 1000)
+        + "<td class=\"underreplicatedblocks\">"
+        + d.decommissioningStatus.getUnderReplicatedBlocks()
+        + "<td class=\"blockswithonlydecommissioningreplicas\">"
+        + d.decommissioningStatus.getDecommissionOnlyReplicas()
+        + "<td class=\"underrepblocksinfilesunderconstruction\">"
+        + d.decommissioningStatus.getUnderReplicatedInOpenFiles()
+        + "<td class=\"timesincedecommissionrequest\">"
+        + hoursSinceDecommStarted + " hrs " + remainderMinutes + " mins"
+        + "\n");
+}
+
 
 public void generateNodeData( JspWriter out, DatanodeDescriptor d,
 		String suffix, boolean alive,
@@ -116,7 +156,8 @@ to interact with datanodes.
 					ServletUtil.percentageGraph( (int)Double.parseDouble(percentUsed) , 100) +
 					"<td align=\"right\" class=\"pcremaining`\">" + percentRemaining +
 					"<td title=" + "\"blocks scheduled : " + d.getBlocksScheduled() + 
-					"\" class=\"blocks\">" + d.numBlocks() + "\n");
+					"\" class=\"blocks\">" + d.numBlocks() +
+					"<td class=\"volfails\">" + d.getVolumeFailures() + "\n");
 }
 
 
@@ -129,7 +170,13 @@ throws IOException {
 	ArrayList<DatanodeDescriptor> dead = new ArrayList<DatanodeDescriptor>();
 	jspHelper.DFSNodesStatus(live, dead);
 
-	whatNodes = request.getParameter("whatNodes"); // show only live or only dead nodes
+       //verify input for correctness 
+       String whatNodes = request.getParameter("whatNodes");// show only live or only dead nodes
+       if (whatNodes == null || whatNodes.length() == 0) {
+         out.print("Invalid input");
+         return;
+       }
+
 	sorterField = request.getParameter("sorter/field");
 	sorterOrder = request.getParameter("sorter/order");
 	if ( sorterField == null )
@@ -201,7 +248,8 @@ throws IOException {
 						NodeHeaderStr("pcused") + "> Used <br>(%) <th " + 
 						NodeHeaderStr("pcused") + "> Used <br>(%) <th " +
 						NodeHeaderStr("pcremaining") + "> Remaining <br>(%) <th " +
-						NodeHeaderStr("blocks") + "> Blocks\n" );
+						NodeHeaderStr("blocks") + "> Blocks <th " +
+						NodeHeaderStr("volfails") + "> Failed Volumes\n" );
 
 				jspHelper.sortNodeList(live, sorterField, sorterOrder);
 				for ( int i=0; i < live.size(); i++ ) {
@@ -209,7 +257,7 @@ throws IOException {
 				}
 			}
 			out.print("</table>\n");
-		} else {
+		} else if (whatNodes.equals("DEAD")) {
 
 			out.print("<br> <a name=\"DeadNodes\" id=\"title\"> " +
 					" Dead Datanodes : " +dead.size() + "</a><br><br>\n");
@@ -225,8 +273,39 @@ throws IOException {
 
 				out.print("</table>\n");
 			}
-		}
-		out.print("</div>");
+		} else if (whatNodes.equals("DECOMMISSIONING")) {
+			// Decommissioning Nodes
+			ArrayList<DatanodeDescriptor> decommissioning = nn.getNamesystem()
+			    .getDecommissioningNodes();
+			out.print("<br> <a name=\"DecommissioningNodes\" id=\"title\"> "
+			    + " Decommissioning Datanodes : " + decommissioning.size()
+                            + "</a><br><br>\n");
+	                if (decommissioning.size() > 0) {
+                          out.print("<table border=1 cellspacing=0> <tr class=\"headRow\"> "
+                              + "<th " + NodeHeaderStr("name")
+                              + "> Node <th " + NodeHeaderStr("lastcontact")
+                              + "> Last <br>Contact <th "
+                              + NodeHeaderStr("underreplicatedblocks")
+                              + "> Under Replicated Blocks <th "
+                              + NodeHeaderStr("blockswithonlydecommissioningreplicas")
+		              + "> Blocks With No <br> Live Replicas <th "
+	                      + NodeHeaderStr("underrepblocksinfilesunderconstruction") 
+	                      + "> Under Replicated Blocks <br> In Files Under Construction"
+	                      + " <th " + NodeHeaderStr("timesincedecommissionrequest")
+	                      + "> Time Since Decommissioning Started"
+                          );
+                          jspHelper.sortNodeList(decommissioning, "name", "ASC");
+                          for (int i = 0; i < decommissioning.size(); i++) {
+                            generateDecommissioningNodeData(out, decommissioning.get(i),
+                                port_suffix, true, nnHttpPort);
+                          }
+                          out.print("</table>\n");
+                        }
+                        out.print("</div>");
+                  } else {
+                    // if nothing matches then print invalid input
+                    out.println("Invalid input");
+                  }
 	}
 }%>
 

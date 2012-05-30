@@ -408,6 +408,60 @@ public class SequenceFile {
 
   /**
    * Construct the preferred type of SequenceFile Writer.
+   * @param fs The configured filesystem.
+   * @param conf The configuration.
+   * @param name The name of the file.
+   * @param keyClass The 'key' type.
+   * @param valClass The 'value' type.
+   * @param bufferSize buffer size for the underlaying outputstream.
+   * @param replication replication factor for the file.
+   * @param blockSize block size for the file.
+   * @param createParent create parent directory if non-existent
+   * @param compressionType The compression type.
+   * @param codec The compression codec.
+   * @param progress The Progressable object to track progress.
+   * @param metadata The metadata of the file.
+   * @return Returns the handle to the constructed SequenceFile Writer.
+   * @throws IOException
+   */
+  public static Writer
+    createWriter(FileSystem fs, Configuration conf, Path name,
+                 Class keyClass, Class valClass, int bufferSize,
+                 short replication, long blockSize, boolean createParent,
+                 CompressionType compressionType, CompressionCodec codec,
+                 Metadata metadata) throws IOException {
+    if ((codec instanceof GzipCodec) &&
+        !NativeCodeLoader.isNativeCodeLoaded() &&
+        !ZlibFactory.isNativeZlibLoaded(conf)) {
+      throw new IllegalArgumentException("SequenceFile doesn't work with " +
+                                         "GzipCodec without native-hadoop code!");
+    }
+
+
+    FSDataOutputStream fsos;
+    if (createParent) {
+      fsos = fs.create(name, true, bufferSize, replication, blockSize);
+    } else {
+      fsos = fs.createNonRecursive(name, true, bufferSize, replication,
+          blockSize, null);
+    }
+
+    switch (compressionType) {
+    case NONE:
+      return new Writer(conf, fsos, keyClass, valClass, metadata).ownStream();
+    case RECORD:
+      return new RecordCompressWriter(conf, fsos, keyClass, valClass, codec,
+          metadata).ownStream();
+    case BLOCK:
+      return new BlockCompressWriter(conf, fsos, keyClass, valClass, codec,
+          metadata).ownStream();
+    default:
+      return null;
+    }
+  } 
+  
+  /**
+   * Construct the preferred type of SequenceFile Writer.
    * @param fs The configured filesystem. 
    * @param conf The configuration.
    * @param name The name of the file. 
@@ -849,7 +903,7 @@ public class SequenceFile {
     }
 
     /** Write to an arbitrary stream using a specified buffer size. */
-    private Writer(Configuration conf, FSDataOutputStream out, 
+    Writer(Configuration conf, FSDataOutputStream out, 
                    Class keyClass, Class valClass, Metadata metadata)
       throws IOException {
       this.ownOutputStream = false;
@@ -875,6 +929,8 @@ public class SequenceFile {
     
     boolean isCompressed() { return compress; }
     boolean isBlockCompressed() { return false; }
+    
+    Writer ownStream() { this.ownOutputStream = true; return this; }
     
     /** Write and flush the file header. */
     void writeFileHeader() 
@@ -1096,7 +1152,7 @@ public class SequenceFile {
     }
     
     /** Write to an arbitrary stream using a specified buffer size. */
-    private RecordCompressWriter(Configuration conf, FSDataOutputStream out,
+    RecordCompressWriter(Configuration conf, FSDataOutputStream out,
                                  Class keyClass, Class valClass, CompressionCodec codec, Metadata metadata)
       throws IOException {
       this.ownOutputStream = false;
@@ -1205,7 +1261,7 @@ public class SequenceFile {
       super.init(name, conf,
                  fs.create(name, true, bufferSize, replication, blockSize, progress),
                  keyClass, valClass, true, codec, metadata);
-      init(conf.getInt("io.seqfile.compress.blocksize", 1000000));
+      init(1000000);
 
       initializeFileHeader();
       writeFileHeader();
@@ -1221,12 +1277,12 @@ public class SequenceFile {
     }
     
     /** Write to an arbitrary stream using a specified buffer size. */
-    private BlockCompressWriter(Configuration conf, FSDataOutputStream out,
+    BlockCompressWriter(Configuration conf, FSDataOutputStream out,
                                 Class keyClass, Class valClass, CompressionCodec codec, Metadata metadata)
       throws IOException {
       this.ownOutputStream = false;
       super.init(null, conf, out, keyClass, valClass, true, codec, metadata);
-      init(1000000);
+      init(conf.getInt("io.seqfile.compress.blocksize", 1000000));
       
       initializeFileHeader();
       writeFileHeader();
@@ -1430,9 +1486,17 @@ public class SequenceFile {
       this.file = file;
       this.in = openFile(fs, file, bufferSize, length);
       this.conf = conf;
-      seek(start);
-      this.end = in.getPos() + length;
-      init(tempReader);
+      boolean succeeded = false;
+      try {
+        seek(start);
+        this.end = in.getPos() + length;
+        init(tempReader);
+        succeeded = true;
+      } finally {
+        if (!succeeded) {
+          IOUtils.cleanup(LOG, in);
+        }
+      }
     }
 
     /**

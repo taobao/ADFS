@@ -30,7 +30,6 @@ import org.apache.commons.logging.Log;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hdfs.protocol.FSConstants;
 import org.apache.hadoop.hdfs.server.balancer.Balancer;
-import org.apache.hadoop.util.Daemon;
 import org.apache.hadoop.util.StringUtils;
 
 /**
@@ -133,10 +132,10 @@ class DataXceiverServer implements Runnable, FSConstants {
       } catch (SocketTimeoutException ignored) {
         // wake up to see if should continue to run
       } catch (IOException ie) {
-        LOG.warn(datanode.dnRegistration + ":DataXceiveServer: " 
-                                + StringUtils.stringifyException(ie));
+        LOG.warn(datanode.dnRegistration + ":DataXceiverServer: IOException due to:"
+                                 + StringUtils.stringifyException(ie));
       } catch (Throwable te) {
-        LOG.error(datanode.dnRegistration + ":DataXceiveServer: Exiting due to:" 
+        LOG.error(datanode.dnRegistration + ":DataXceiverServer: Exiting due to:" 
                                  + StringUtils.stringifyException(te));
         datanode.shouldRun = false;
       }
@@ -144,9 +143,10 @@ class DataXceiverServer implements Runnable, FSConstants {
     try {
       ss.close();
     } catch (IOException ie) {
-      LOG.warn(datanode.dnRegistration + ":DataXceiveServer: " 
-                              + StringUtils.stringifyException(ie));
+      LOG.warn(datanode.dnRegistration + ":DataXceiverServer: Close exception due to: "
+                               + StringUtils.stringifyException(ie));
     }
+    LOG.info("Exiting DataXceiverServer");
   }
   
   void kill() {
@@ -155,7 +155,7 @@ class DataXceiverServer implements Runnable, FSConstants {
     try {
       this.ss.close();
     } catch (IOException ie) {
-      LOG.warn(datanode.dnRegistration + ":DataXceiveServer.kill(): " 
+      LOG.warn(datanode.dnRegistration + ":DataXceiverServer.kill(): "
                               + StringUtils.stringifyException(ie));
     }
 

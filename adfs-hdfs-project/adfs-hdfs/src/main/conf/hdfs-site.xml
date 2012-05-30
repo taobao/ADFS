@@ -14,43 +14,6 @@
     <value>4096</value>                                                                                       
   </property>                                                                                                                 
 
-  <property>
-    <name>dfs.namenode.selector</name>
-    <value>org.apache.hadoop.hdfs.server.common.ConfNameNodeSelector</value>
-    <description>The policy of looking for and selecting name node</description>
-  </property>
-
-  <property>
-    <name>dfs.namenode.rpcaddr.list</name>
-    <value>hdfs://127.0.0.1:51199</value>
-    <description>The list of name nodes' RPC addr list, separated with comma</description>
-  </property>
-
-  <property>
-    <name>zookeeper.server.list</name>
-    <value>127.0.0.1:2181</value>
-  </property>
-  
-  <property>                                                                                                        
-    <name>dfs.client.reselectnamenode</name>
-    <value>true</value>                                                                
-  </property>
-                                                                                                                  
-  <property>                                                                                                        
-    <name>dfs.client.refreshnamenode</name>
-    <value>true</value>
-  </property>
-                                                                                                                   
-  <property>
-    <name>dfs.namenode.selector.timeout</name>
-    <value>20000</value>
-  </property>                                                                                                       
-                                                                                                                  
-  <property>                                                                                                        
-    <name>dfs.namenode.selector.maxretrycount</name>
-    <value>3</value>
-  </property>
-  
   <property>                                                                                                        
     <name>distributed.manager.address</name>                                                                  
     <value>127.0.0.1:2181</value>     

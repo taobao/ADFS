@@ -49,47 +49,41 @@ public class NameNodeMetrics implements Updater {
     private NameNodeActivtyMBean namenodeActivityMBean;
     
     public MetricsTimeVaryingInt numFilesCreated =
-                    new MetricsTimeVaryingInt("FilesCreatedOps", registry);
+                          new MetricsTimeVaryingInt("FilesCreated", registry);
     public MetricsTimeVaryingInt numFilesAppended =
-                    new MetricsTimeVaryingInt("FilesAppendedOps", registry);
+                          new MetricsTimeVaryingInt("FilesAppended", registry);
     public MetricsTimeVaryingInt numGetBlockLocations = 
-                    new MetricsTimeVaryingInt("GetBlockLocationsOps", registry);
+                    new MetricsTimeVaryingInt("GetBlockLocations", registry);
     public MetricsTimeVaryingInt numFilesRenamed =
-                    new MetricsTimeVaryingInt("FilesRenamedOps", registry);
+                    new MetricsTimeVaryingInt("FilesRenamed", registry);
     public MetricsTimeVaryingInt numGetListingOps = 
                     new MetricsTimeVaryingInt("GetListingOps", registry);
     public MetricsTimeVaryingInt numCreateFileOps = 
                     new MetricsTimeVaryingInt("CreateFileOps", registry);
     public MetricsTimeVaryingInt numDeleteFileOps = 
-                    new MetricsTimeVaryingInt("DeleteFileOps", registry);
+                          new MetricsTimeVaryingInt("DeleteFileOps", registry);
     public MetricsTimeVaryingInt numFileInfoOps =
-                    new MetricsTimeVaryingInt("FileInfoOps", registry);
-    public MetricsTimeVaryingInt numFileCompleteOps =
-                    new MetricsTimeVaryingInt("FileCompleteOps", registry);
-    public MetricsTimeVaryingRate fileComplete =
-                    new MetricsTimeVaryingRate("FileComplete", registry, "File Complete");
+                          new MetricsTimeVaryingInt("FileInfoOps", registry);
     public MetricsTimeVaryingInt numAddBlockOps = 
-                    new MetricsTimeVaryingInt("AddBlockOps", registry);
-    public MetricsTimeVaryingInt numBlockReceivedOps = 
-                    new MetricsTimeVaryingInt("BlockReceivedOps", registry);
-    public MetricsTimeVaryingRate blockReceived =
-                    new MetricsTimeVaryingRate("BlockReceived", registry, "Block Received");
-    public MetricsTimeVaryingRate getBlocksLocation =
-                    new MetricsTimeVaryingRate("GetBlockLocation", registry, "Get Block Locations");
+                          new MetricsTimeVaryingInt("AddBlockOps", registry);
+
+    public MetricsTimeVaryingRate transactions =
+                    new MetricsTimeVaryingRate("Transactions", registry, "Journal Transaction");
+    public MetricsTimeVaryingRate syncs =
+                    new MetricsTimeVaryingRate("Syncs", registry, "Journal Sync");
+    public MetricsTimeVaryingInt transactionsBatchedInSync = 
+                    new MetricsTimeVaryingInt("JournalTransactionsBatchedInSync", registry, "Journal Transactions Batched In Sync");
     public MetricsTimeVaryingRate blockReport =
-                    new MetricsTimeVaryingRate("BlockReport", registry, "Block Report");
+                    new MetricsTimeVaryingRate("blockReport", registry, "Block Report");
+    public MetricsIntValue safeModeTime =
+                    new MetricsIntValue("SafemodeTime", registry, "Duration in SafeMode at Startup");
+    public MetricsIntValue fsImageLoadTime = 
+                    new MetricsIntValue("fsImageLoadTime", registry, "Time loading FS Image at Startup");
     public MetricsIntValue numBlocksCorrupted =
-                    new MetricsIntValue("BlocksCorruptedOps", registry);
-    public MetricsTimeVaryingInt numFsyncOps = 
-                    new MetricsTimeVaryingInt("FsyncOps", registry);
-    public MetricsTimeVaryingInt numRenewLeaseOps = 
-                    new MetricsTimeVaryingInt("RenewLeaseOps", registry);
-    public MetricsTimeVaryingInt numSetReplicationOps = 
-                    new MetricsTimeVaryingInt("SetReplicationOps", registry);
-    public MetricsTimeVaryingInt numBlockSynchronizationOps = 
-                    new MetricsTimeVaryingInt("BlockSynchronizationOps", registry);
-    public MetricsTimeVaryingRate blockSynchronization =
-                    new MetricsTimeVaryingRate("BlockSynchronization", registry, "Block Synchronization");
+                    new MetricsIntValue("BlocksCorrupted", registry);
+    public MetricsTimeVaryingInt numFilesInGetListingOps = 
+                    new MetricsTimeVaryingInt("FilesInGetListingOps", registry);
+
       
     public NameNodeMetrics(Configuration conf, NameNode nameNode) {
       String sessionId = conf.get("session.id");
@@ -130,10 +124,8 @@ public class NameNodeMetrics implements Updater {
     }
 
     public void resetAllMinMax() {
+      transactions.resetMinMax();
+      syncs.resetMinMax();
       blockReport.resetMinMax();
-      blockReceived.resetMinMax();
-      getBlocksLocation.resetMinMax();
-      fileComplete.resetMinMax();
-      blockSynchronization.resetMinMax();
     }
 }

@@ -73,13 +73,14 @@ public class DataNodeMetrics implements Updater {
               new MetricsTimeVaryingInt("writes_from_local_client", registry);
   public MetricsTimeVaryingInt writesFromRemoteClient = 
               new MetricsTimeVaryingInt("writes_from_remote_client", registry);
+
+  public MetricsTimeVaryingInt volumeFailures =
+    new MetricsTimeVaryingInt("volumeFailures", registry);
   
   public MetricsTimeVaryingRate readBlockOp = 
                 new MetricsTimeVaryingRate("readBlockOp", registry);
   public MetricsTimeVaryingRate writeBlockOp = 
                 new MetricsTimeVaryingRate("writeBlockOp", registry);
-  public MetricsTimeVaryingRate readMetadataOp = 
-                new MetricsTimeVaryingRate("readMetadataOp", registry);
   public MetricsTimeVaryingRate blockChecksumOp = 
                 new MetricsTimeVaryingRate("blockChecksumOp", registry);
   public MetricsTimeVaryingRate copyBlockOp = 
@@ -128,7 +129,6 @@ public class DataNodeMetrics implements Updater {
   public void resetAllMinMax() {
     readBlockOp.resetMinMax();
     writeBlockOp.resetMinMax();
-    readMetadataOp.resetMinMax();
     blockChecksumOp.resetMinMax();
     copyBlockOp.resetMinMax();
     replaceBlockOp.resetMinMax();

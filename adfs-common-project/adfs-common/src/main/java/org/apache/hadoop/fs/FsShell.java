@@ -22,8 +22,6 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
-import java.text.DecimalFormat;
-import java.text.NumberFormat;
 import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.zip.GZIPInputStream;
@@ -47,8 +45,12 @@ import org.apache.hadoop.util.Tool;
 import org.apache.hadoop.util.ToolRunner;
 import org.apache.hadoop.util.StringUtils;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+
 /** Provide command line access to a FileSystem. */
 public class FsShell extends Configured implements Tool {
+  static final Log LOG = LogFactory.getLog(FsShell.class);
 
   protected FileSystem fs;
   private Trash trash;
@@ -335,7 +337,7 @@ public class FsShell extends Configured implements Tool {
    * @exception: IOException
    * @see org.apache.hadoop.fs.FileSystem.globStatus 
    */
-  void cat(String src, boolean verifyChecksum) throws IOException {
+  void cat(final String src, boolean verifyChecksum) throws IOException {
     //cat behavior in Linux
     //  [~/1207]$ ls ?.txt
     //  x.txt  z.txt
@@ -348,9 +350,6 @@ public class FsShell extends Configured implements Tool {
     new DelayedExceptionThrowing() {
       @Override
       void process(Path p, FileSystem srcFs) throws IOException {
-        if (srcFs.getFileStatus(p).isDir()) {
-          throw new IOException("Source must be a file.");
-        }
         printToStdout(srcFs.open(p));
       }
     }.globAndProcess(srcPattern, getSrcFileSystem(srcPattern, verifyChecksum));
@@ -638,28 +637,11 @@ public class FsShell extends Configured implements Tool {
           stat.getPermission() + " ");
         System.out.printf("%"+ maxReplication + 
           "s ", (!stat.isDir() ? stat.getReplication() : "-"));
-        if (maxOwner > 0) {
-          String statOwner = stat.getOwner();
-          if( ! statOwner.equals("0")){
-            System.out.printf("%-"+ maxOwner + "s ", stat.getOwner());
-          } else {
-            System.out.printf("%-"+ maxOwner + "s ", "hadoop");
-          }
-        }
-        if (maxGroup > 0) {
-          String statGroup = stat.getGroup();
-          if(statGroup.length() != 0) {
-            System.out.printf("%-"+ maxGroup + "s ", statGroup);
-          } else {
-            System.out.printf("%-"+ maxGroup + "s ", "supergroup");
-          }
-        }
-        long length = stat.getLen();
-        if(length > 0) {
-          System.out.printf("%"+ maxLen + "d ", stat.getLen());
-        } else {
-          System.out.printf("%"+ maxLen + "d ", 0);
-        }
+        if (maxOwner > 0)
+          System.out.printf("%-"+ maxOwner + "s ", stat.getOwner());
+        if (maxGroup > 0)
+          System.out.printf("%-"+ maxGroup + "s ", stat.getGroup());
+        System.out.printf("%"+ maxLen + "d ", stat.getLen());
         System.out.print(mdate + " ");
         System.out.println(cur.toUri().getPath());
         if (recursive && stat.isDir()) {
@@ -956,6 +938,7 @@ public class FsShell extends Configured implements Tool {
         //
         rename(argv[i], dest);
       } catch (RemoteException e) {
+        LOG.debug("Error", e);
         //
         // This is a error returned by hadoop server. Print
         // out the first line of the error mesage.
@@ -970,6 +953,7 @@ public class FsShell extends Configured implements Tool {
                              ex.getLocalizedMessage());
         }
       } catch (IOException e) {
+        LOG.debug("Error", e);
         //
         // IO exception encountered locally.
         //
@@ -1040,6 +1024,7 @@ public class FsShell extends Configured implements Tool {
         //
         copy(argv[i], dest, conf);
       } catch (RemoteException e) {
+        LOG.debug("Error", e);
         //
         // This is a error returned by hadoop server. Print
         // out the first line of the error mesage.
@@ -1055,6 +1040,7 @@ public class FsShell extends Configured implements Tool {
                              ex.getLocalizedMessage());
         }
       } catch (IOException e) {
+        LOG.debug("Error", e);
         //
         // IO exception encountered locally.
         //
@@ -1109,10 +1095,21 @@ public class FsShell extends Configured implements Tool {
     }
     
     if(!skipTrash) {
-      Trash trashTmp = new Trash(srcFs, getConf());
-      if (trashTmp.moveToTrash(src)) {
-        System.out.println("Moved to trash: " + src);
-        return;
+      try {
+	      Trash trashTmp = new Trash(srcFs, getConf());
+        if (trashTmp.moveToTrash(src)) {
+          System.out.println("Moved to trash: " + src);
+          return;
+        }
+      } catch (IOException e) {
+        LOG.debug("Error", e);
+        Exception cause = (Exception) e.getCause();
+        String msg = "";
+        if(cause != null) {
+          msg = cause.getLocalizedMessage();
+        }
+        System.err.println("Problem with Trash." + msg +". Consider using -skipTrash option");        
+        throw e;
       }
     }
     
@@ -1258,6 +1255,12 @@ public class FsShell extends Configured implements Tool {
       Path srcPath = new Path(args[i]);
       FileSystem srcFs = srcPath.getFileSystem(getConf());
       Path[] paths = FileUtil.stat2Paths(srcFs.globStatus(srcPath), srcPath);
+      // if nothing matches to given glob pattern then increment error count
+      if(paths.length==0) {
+        System.err.println(handler.getName() + 
+            ": could not get status for '" + args[i] + "'");
+        errors++;
+      }
       for(Path path : paths) {
         try {
           FileStatus file = srcFs.getFileStatus(path);
@@ -1269,11 +1272,13 @@ public class FsShell extends Configured implements Tool {
             errors += runCmdHandler(handler, file, srcFs, recursive);
           }
         } catch (IOException e) {
+          LOG.debug("Error", e);
           String msg = (e.getMessage() != null ? e.getLocalizedMessage() :
             (e.getCause().getMessage() != null ? 
                 e.getCause().getLocalizedMessage() : "null"));
           System.err.println(handler.getName() + ": could not get status for '"
-                                        + path + "': " + msg.split("\n")[0]);        
+                                        + path + "': " + msg.split("\n")[0]);
+          errors++;
         }
       }
     }
@@ -1440,9 +1445,10 @@ public class FsShell extends Configured implements Tool {
       "\t-R\tmodifies the files recursively. This is the only option\n" +
       "\t\tcurrently supported.\n\n" +
       "\tMODE\tMode is same as mode used for chmod shell command.\n" +
-      "\t\tOnly letters recognized are 'rwxX'. E.g. a+r,g-w,+rwx,o=r\n\n" +
-      "\tOCTALMODE Mode specifed in 3 digits. Unlike shell command,\n" +
-      "\t\tthis requires all three digits.\n" +
+      "\t\tOnly letters recognized are 'rwxXt'. E.g. +t,a+r,g-w,+rwx,o=r\n\n" +
+      "\tOCTALMODE Mode specifed in 3 or 4 digits. If 4 digits, the first may\n" +
+      "\tbe 1 or 0 to turn the sticky bit on or off, respectively.  Unlike " +
+      "\tshell command, it is not possible to specify only part of the mode\n" +
       "\t\tE.g. 754 is same as u=rwx,g=rx,o=r\n\n" +
       "\t\tIf none of 'augo' is specified, 'a' is assumed and unlike\n" +
       "\t\tshell command, no umask is applied.\n";
@@ -1621,6 +1627,7 @@ public class FsShell extends Configured implements Tool {
           text(argv[i]);
         }
       } catch (RemoteException e) {
+        LOG.debug("Error", e);
         //
         // This is a error returned by hadoop server. Print
         // out the first line of the error message.
@@ -1636,6 +1643,7 @@ public class FsShell extends Configured implements Tool {
                              ex.getLocalizedMessage());
         }
       } catch (IOException e) {
+        LOG.debug("Error", e);
         //
         // IO exception encountered locally.
         //
@@ -1794,7 +1802,9 @@ public class FsShell extends Configured implements Tool {
                          "... command aborted.");
       return exitCode;
     } catch (IOException e) {
-      System.err.println("Bad connection to FS. command aborted.");
+      LOG.debug("Error", e);
+      System.err.println("Bad connection to FS. command aborted. exception: " +
+          e.getLocalizedMessage());
       return exitCode;
     }
 
@@ -1828,7 +1838,7 @@ public class FsShell extends Configured implements Tool {
       } else if ("-chmod".equals(cmd) || 
                  "-chown".equals(cmd) ||
                  "-chgrp".equals(cmd)) {
-        FsShellPermissions.changePermissions(fs, cmd, argv, i, this);
+        exitCode = FsShellPermissions.changePermissions(fs, cmd, argv, i, this);
       } else if ("-ls".equals(cmd)) {
         if (i < argv.length) {
           exitCode = doall(cmd, argv, i);
@@ -1897,10 +1907,12 @@ public class FsShell extends Configured implements Tool {
         printUsage("");
       }
     } catch (IllegalArgumentException arge) {
+      LOG.debug("Error", arge);
       exitCode = -1;
       System.err.println(cmd.substring(1) + ": " + arge.getLocalizedMessage());
       printUsage(cmd);
     } catch (RemoteException e) {
+      LOG.debug("Error", e);
       //
       // This is a error returned by hadoop server. Print
       // out the first line of the error mesage, ignore the stack trace.
@@ -1915,6 +1927,7 @@ public class FsShell extends Configured implements Tool {
                            ex.getLocalizedMessage());  
       }
     } catch (IOException e) {
+      LOG.debug("Error", e);
       //
       // IO exception encountered locally.
       // 
@@ -1922,6 +1935,7 @@ public class FsShell extends Configured implements Tool {
       System.err.println(cmd.substring(1) + ": " + 
                          e.getLocalizedMessage());  
     } catch (Exception re) {
+      LOG.debug("Error", re);
       exitCode = -1;
       System.err.println(cmd.substring(1) + ": " + re.getLocalizedMessage());  
     } finally {

@@ -42,8 +42,6 @@ public class FileStatus implements Writable, Comparable {
   
   public FileStatus() { this(0, false, 0, 0, 0, 0, null, null, null, null); }
   
-  public FileStatus(String src) { this(0, false, 0, 0, 0, 0, null, null, null, new Path(src)); }
-  
   //We should deprecate this soon?
   public FileStatus(long length, boolean isdir, int block_replication,
                     long blocksize, long modification_time, Path path) {
@@ -75,10 +73,6 @@ public class FileStatus implements Writable, Comparable {
   public long getLen() {
     return length;
   }
-  public void setLength(long length) {
-    this.length = length;
-  }
-
 
   /**
    * Is this a directory?

@@ -53,6 +53,7 @@ public interface HdfsConstants {
   public static int WRITE_TIMEOUT_EXTENSION = 5 * 1000; //for write pipeline
   public static int DN_KEEPALIVE_TIMEOUT = 5 * 1000;
 
+
   // The lease holder for recovery initiated by the NameNode
   public static final String NN_RECOVERY_LEASEHOLDER = "NN_Recovery";
 

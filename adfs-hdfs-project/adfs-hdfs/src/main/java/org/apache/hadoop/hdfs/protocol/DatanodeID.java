@@ -25,27 +25,52 @@ import java.io.IOException;
 import org.apache.hadoop.io.UTF8;
 import org.apache.hadoop.io.WritableComparable;
 
-import org.apache.hadoop.hdfs.IPFromStorageIDUtil;
-import org.apache.hadoop.hdfs.server.namenode.NameNode;
+import com.taobao.adfs.util.IpAddress;
+
 /**
- * DatanodeID is composed of the data node 
- * name (hostname:portNumber) and the data storage ID, 
+ * DatanodeID is composed of the data node
+ * name (hostname:portNumber) and the data storage ID,
  * which it currently represents.
  * 
  */
 public class DatanodeID implements WritableComparable<DatanodeID> {
-  public static final DatanodeID[] EMPTY_ARRAY = {}; 
+  public static final DatanodeID[] EMPTY_ARRAY = {};
 
-  public String name;      /// hostname:portNumber
-  public String storageID; /// unique per cluster storageID
-  protected int infoPort;     /// the port where the infoserver is running
-  public int ipcPort;     /// the port where the ipc server is running
+  public String name; // / hostname:portNumber
+  public String storageID; // / unique per cluster storageID
+  public int infoPort; // / the port where the infoserver is running
+  public int ipcPort; // / the port where the ipc server is running
+  public long id = 0;
+
+  /**
+   * generate a long value as id of data node, value is based on storageId
+   */
+  public long getId() {
+    if (id != 0) return id;
+    if (name == null || name.isEmpty()) id = 0;
+    String[] idParts = name.split(":");
+    if (idParts.length < 2 || idParts[0] == null || idParts[1] == null)
+      throw new RuntimeException("fail to parse name=" + name);
+    long id = 0;
+    try {
+      id |= IpAddress.getAddress(idParts[0]);
+    } catch (IOException e) {
+      throw new RuntimeException("fail to parse name=" + name, e);
+    }
+    id <<= 32;
+    id |= Integer.valueOf(idParts[1]);
+    return this.id = id;
+  }
 
   /** Equivalent to DatanodeID(""). */
-  public DatanodeID() {this("");}
+  public DatanodeID() {
+    this("");
+  }
 
   /** Equivalent to DatanodeID(nodeName, "", -1, -1). */
-  public DatanodeID(String nodeName) {this(nodeName, "", -1, -1);}
+  public DatanodeID(String nodeName) {
+    this(nodeName, "", -1, -1);
+  }
 
   /**
    * DatanodeID copy constructor
@@ -53,34 +78,35 @@ public class DatanodeID implements WritableComparable<DatanodeID> {
    * @param from
    */
   public DatanodeID(DatanodeID from) {
-    this(from.getName(),
-        from.getStorageID(),
-        from.getInfoPort(),
-        from.getIpcPort());
+    this(from.getName(), from.getStorageID(), from.getInfoPort(), from.getIpcPort());
   }
-  
+
   /**
    * Create DatanodeID
-   * @param nodeName (hostname:portNumber) 
-   * @param storageID data storage ID
-   * @param infoPort info server port 
-   * @param ipcPort ipc server port
+   * 
+   * @param nodeName
+   *          (hostname:portNumber)
+   * @param storageID
+   *          data storage ID
+   * @param infoPort
+   *          info server port
+   * @param ipcPort
+   *          ipc server port
    */
-  public DatanodeID(String nodeName, String storageID,
-      int infoPort, int ipcPort) {
+  public DatanodeID(String nodeName, String storageID, int infoPort, int ipcPort) {
     this.name = nodeName;
     this.storageID = storageID;
     this.infoPort = infoPort;
     this.ipcPort = ipcPort;
   }
-  
+
   /**
    * @return hostname:portNumber.
    */
   public String getName() {
     return name;
   }
-  
+
   /**
    * @return data storage ID.
    */
@@ -120,34 +146,28 @@ public class DatanodeID implements WritableComparable<DatanodeID> {
       return name.substring(0, colon);
     }
   }
-  
+
   public int getPort() {
     int colon = name.indexOf(":");
-    if (colon < 0) {
-      return 50010; // default port.
+    if (colon < 0) { return 50010; // default port.
     }
-    return Integer.parseInt(name.substring(colon+1));
+    return Integer.parseInt(name.substring(colon + 1));
   }
 
   public boolean equals(Object to) {
-    if (this == to) {
-      return true;
-    }
-    if (!(to instanceof DatanodeID)) {
-      return false;
-    }
-    return (name.equals(((DatanodeID)to).getName()) &&
-            storageID.equals(((DatanodeID)to).getStorageID()));
+    if (this == to) { return true; }
+    if (!(to instanceof DatanodeID)) { return false; }
+    return (name.equals(((DatanodeID) to).getName()) && storageID.equals(((DatanodeID) to).getStorageID()));
   }
-  
+
   public int hashCode() {
-    return name.hashCode()^ storageID.hashCode();
+    return name.hashCode() ^ storageID.hashCode();
   }
-  
+
   public String toString() {
     return name;
   }
-  
+
   /**
    * Update fields when a new registration request comes in.
    * Note that this does not update storageID.
@@ -158,9 +178,11 @@ public class DatanodeID implements WritableComparable<DatanodeID> {
     ipcPort = nodeReg.getIpcPort();
     // update any more fields added in future.
   }
-    
-  /** Comparable.
+
+  /**
+   * Comparable.
    * Basis of compare is the String name (host:portNumber) only.
+   * 
    * @param that
    * @return as specified by Comparable.
    */
@@ -168,9 +190,9 @@ public class DatanodeID implements WritableComparable<DatanodeID> {
     return name.compareTo(that.getName());
   }
 
-  /////////////////////////////////////////////////
+  // ///////////////////////////////////////////////
   // Writable
-  /////////////////////////////////////////////////
+  // ///////////////////////////////////////////////
   /** {@inheritDoc} */
   public void write(DataOutput out) throws IOException {
     UTF8.writeString(out, name);
@@ -184,16 +206,8 @@ public class DatanodeID implements WritableComparable<DatanodeID> {
     storageID = UTF8.readString(in);
     // the infoPort read could be negative, if the port is a large number (more
     // than 15 bits in storage size (but less than 16 bits).
-    // So chop off the first two bytes (and hence the signed bits) before 
+    // So chop off the first two bytes (and hence the signed bits) before
     // setting the field.
     this.infoPort = in.readShort() & 0x0000ffff;
-  }
-  
-  public int getNodeid() {
-    int id = IPFromStorageIDUtil.getIDFromStorageID(storageID);
-    if(id == -1){
-      NameNode.LOG.info("=== e... nodeid == -1 ===");
-    }
-    return id;
   }
 }

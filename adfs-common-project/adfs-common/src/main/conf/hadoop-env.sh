@@ -45,7 +45,7 @@ export HADOOP_JOBTRACKER_OPTS="-Dcom.sun.management.jmxremote $HADOOP_JOBTRACKER
 # export HADOOP_SLAVE_SLEEP=0.1
 
 # The directory where pid files are stored. /tmp by default.
-# export HADOOP_PID_DIR=/var/hadoop/pids
+export HADOOP_PID_DIR=pids
 
 # A string representing this instance of hadoop. $USER by default.
 # export HADOOP_IDENT_STRING=$USER

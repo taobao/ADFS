@@ -21,12 +21,10 @@
   <parent>
     <groupId>com.taobao.adfs</groupId>
     <artifactId>adfs-project</artifactId>
-    <version>0.2.1</version>
+    <version>0.3.0</version>
     <relativePath>../adfs-project</relativePath>
   </parent>
-  <groupId>com.taobao.adfs</groupId>
   <artifactId>adfs-assemblies</artifactId>
-  <version>0.2.1</version>
   <name>ADFS Assemblies POM</name>
   <description>ADFS Assemblies POM</description>
 

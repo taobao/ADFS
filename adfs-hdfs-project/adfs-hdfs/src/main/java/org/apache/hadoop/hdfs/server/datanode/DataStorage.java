@@ -41,6 +41,7 @@ import org.apache.hadoop.hdfs.server.common.Storage;
 import org.apache.hadoop.hdfs.server.common.StorageInfo;
 import org.apache.hadoop.hdfs.server.protocol.NamespaceInfo;
 import org.apache.hadoop.util.Daemon;
+import org.apache.hadoop.util.StringUtils;
 import org.apache.hadoop.fs.FileUtil.HardLink;
 import org.apache.hadoop.io.IOUtils;
 
@@ -129,16 +130,20 @@ public class DataStorage extends Storage {
         }
       } catch (IOException ioe) {
         sd.unlock();
-        throw ioe;
+        LOG.warn("Ignoring storage directory " + dataDir +
+            " due to exception: " + StringUtils.stringifyException(ioe));
+        // Continue with other good dirs
+        continue;
       }
       // add to the storage list
       addStorageDir(sd);
       dataDirStates.add(curState);
     }
 
-    if (dataDirs.size() == 0)  // none of the data dirs exist
-      throw new IOException(
-                            "All specified directories are not accessible or do not exist.");
+    if (dataDirs.size() == 0 || dataDirStates.size() == 0) {
+      throw new IOException("All specified directories are not "
+        +"accessible or do not exist.");
+    }
 
     // 2. Do transitions
     // Each storage directory is treated individually.
@@ -148,8 +153,8 @@ public class DataStorage extends Storage {
       doTransition(getStorageDir(idx), nsInfo, startOpt);
       assert this.getLayoutVersion() == nsInfo.getLayoutVersion() :
         "Data-node and name-node layout versions must be the same.";
-      //assert this.getCTime() == nsInfo.getCTime() :
-        //"Data-node and name-node CTimes must be the same.";
+      assert this.getCTime() == nsInfo.getCTime() :
+        "Data-node and name-node CTimes must be the same.";
     }
     
     // 3. Update all storages. Some of them might have just been formatted.
@@ -234,11 +239,11 @@ public class DataStorage extends Storage {
                             "Incompatible namespaceIDs in " + sd.getRoot().getCanonicalPath()
                             + ": namenode namespaceID = " + nsInfo.getNamespaceID() 
                             + "; datanode namespaceID = " + getNamespaceID());
-    if (this.layoutVersion == FSConstants.LAYOUT_VERSION) 
-        //&& this.cTime == nsInfo.getCTime())
+    if (this.layoutVersion == FSConstants.LAYOUT_VERSION 
+        && this.cTime == nsInfo.getCTime())
       return; // regular startup
     // verify necessity of a distributed upgrade
-    // verifyDistributedUpgradeProgress(nsInfo);
+    verifyDistributedUpgradeProgress(nsInfo);
     if (this.layoutVersion > FSConstants.LAYOUT_VERSION
         || this.cTime < nsInfo.getCTime()) {
       doUpgrade(sd, nsInfo);  // upgrade
@@ -410,14 +415,14 @@ public class DataStorage extends Storage {
     }
   }
 
-  /*private void verifyDistributedUpgradeProgress(
+  private void verifyDistributedUpgradeProgress(
                   NamespaceInfo nsInfo
                 ) throws IOException {
     UpgradeManagerDatanode um = DataNode.getDataNode().upgradeManager;
     assert um != null : "DataNode.upgradeManager is null.";
     um.setUpgradeState(false, getLayoutVersion());
     um.initializeUpgrade(nsInfo);
-  }*/
+  }
   
   private static final Pattern PRE_GENSTAMP_META_FILE_PATTERN = 
     Pattern.compile("(.*blk_[-]*\\d+)\\.meta$");

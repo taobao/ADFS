@@ -1,5 +1,6 @@
 <%@ page
   contentType="text/html; charset=UTF-8"
+  isThreadSafe="false"
   import="javax.servlet.*"
   import="javax.servlet.http.*"
   import="java.io.*"
@@ -125,9 +126,8 @@
 		  HttpServletRequest request)
   throws IOException {
 	  long underReplicatedBlocks = fsn.getUnderReplicatedBlocks();
-	  // FSImage fsImage = fsn.getFSImage();
-	  List<Storage.StorageDirectory> removedStorageDirs = new ArrayList<Storage.StorageDirectory>();
-	  // fsImage.getRemovedStorageDirs();
+	  FSImage fsImage = fsn.getFSImage();
+	  List<Storage.StorageDirectory> removedStorageDirs = fsImage.getRemovedStorageDirs();
 	  String storageDirsSizeStr="", removedStorageDirsSizeStr="", storageDirsStr="", removedStorageDirsStr="", storageDirsDiv="", removedStorageDirsDiv="";
 
 	  //FS Image storage configuration
@@ -136,8 +136,7 @@
 	  "<thead><tr><td><b>Storage Directory</b></td><td><b>Type</b></td><td><b>State</b></td></tr></thead>");
 	  
 	  StorageDirectory st =null;
-	  List<StorageDirectory> sd = new ArrayList<StorageDirectory>();
-	  for (Iterator<StorageDirectory> it = sd.iterator()/*fsImage.dirIterator()*/; it.hasNext();) {
+	  for (Iterator<StorageDirectory> it = fsImage.dirIterator(); it.hasNext();) {
 	      st = it.next();
 	      String dir = "" +  st.getRoot();
 		  String type = "" + st.getStorageDirType();
@@ -165,6 +164,9 @@
     ArrayList<DatanodeDescriptor> dead = new ArrayList<DatanodeDescriptor>();
     jspHelper.DFSNodesStatus(live, dead);
 
+    ArrayList<DatanodeDescriptor> decommissioning = fsn
+        .getDecommissioningNodes();
+	
     sorterField = request.getParameter("sorter/field");
     sorterOrder = request.getParameter("sorter/order");
     if ( sorterField == null )
@@ -219,8 +221,14 @@
 	       		colTxt() + ":" + colTxt() + live.size() +
 	       rowTxt() + colTxt() +
 	       		"<a href=\"dfsnodelist.jsp?whatNodes=DEAD\">Dead Nodes</a> " +
-	       		colTxt() + ":" + colTxt() + dead.size() +
-               "</table></div><br>\n" );
+	       		colTxt() + ":" + colTxt() + dead.size() + rowTxt() + colTxt()
+				+ "<a href=\"dfsnodelist.jsp?whatNodes=DECOMMISSIONING\">"
+				+ "Decommissioning Nodes</a> "
+				+ colTxt() + ":" + colTxt() + decommissioning.size()
+				+ rowTxt() + colTxt()
+				+ "Number of Under-Replicated Blocks" + colTxt() + ":" + colTxt()
+				+ fsn.getUnderReplicatedBlocks()
+                + "</table></div><br>\n" );
     
     if (live.isEmpty() && dead.isEmpty()) {
         out.print("There are no datanodes in the cluster");
@@ -245,8 +253,8 @@
 
 <div id="dfstable"> <table>	  
 <tr> <td id="col1"> Started: <td> <%= fsn.getStartTime()%>
-<tr> <td id="col1"> Version: <td> <%= VersionInfo.getVersion()%>, r<%= VersionInfo.getRevision()%>
-<tr> <td id="col1"> Compiled: <td> <%= VersionInfo.getDate()%> by <%= VersionInfo.getUser()%>
+<tr> <td id="col1"> Version: <td> <%= VersionInfo.getVersion()%>, <%= VersionInfo.getRevision()%>
+<tr> <td id="col1"> Compiled: <td> <%= VersionInfo.getDate()%> by <%= VersionInfo.getUser()%> from <%= VersionInfo.getBranch()%>
 <tr> <td id="col1"> Upgrades: <td> <%= jspHelper.getUpgradeStatusText()%>
 </table></div><br>				      
 

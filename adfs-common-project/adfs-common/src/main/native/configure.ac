@@ -36,10 +36,17 @@
 AC_PREREQ(2.59)
 AC_INIT(src/org_apache_hadoop.h)
 AC_CONFIG_SRCDIR([src/org_apache_hadoop.h])
-AC_CONFIG_AUX_DIR(config)
+AC_CONFIG_AUX_DIR([config])
+AC_CONFIG_MACRO_DIR([m4])
 AC_CONFIG_HEADER([config.h])
+AC_GNU_SOURCE
 
 AM_INIT_AUTOMAKE(hadoop,1.0.0)
+
+# Dont generate rules to re-automake if timestamps are off
+# since we check in the generated files and revision control
+# doesn't track timestamps
+AM_MAINTAINER_MODE
 
 # Checks for programs.
 AC_PROG_CC
@@ -55,10 +62,8 @@ if test $JAVA_HOME != ""
 then
   JNI_LDFLAGS="-L$JAVA_HOME/jre/lib/$OS_ARCH/server"
 fi
-ldflags_bak=$LDFLAGS
 LDFLAGS="$LDFLAGS $JNI_LDFLAGS"
 AC_CHECK_LIB([jvm], [JNI_GetCreatedJavaVMs])
-LDFLAGS=$ldflags_bak
 AC_SUBST([JNI_LDFLAGS])
 
 # Checks for header files.
@@ -86,14 +91,30 @@ AC_SUBST([JNI_CPPFLAGS])
 dnl Check for zlib headers
 AC_CHECK_HEADERS([zlib.h zconf.h], AC_COMPUTE_NEEDED_DSO(z,HADOOP_ZLIB_LIBRARY), AC_MSG_ERROR(Zlib headers were not found... native-hadoop library needs zlib to build. Please install the requisite zlib development package.))
 
+dnl Check for snappy headers
+AC_CHECK_HEADERS([snappy-c.h], AC_COMPUTE_NEEDED_DSO(snappy,HADOOP_SNAPPY_LIBRARY), AC_MSG_WARN(Snappy headers were not found... building without snappy.))
+
+dnl check for posix_fadvise
+AC_CHECK_HEADERS(fcntl.h, [AC_CHECK_FUNCS(posix_fadvise)])
+
+dnl check for sync_file_range
+AC_CHECK_HEADERS(fcntl.h, [AC_CHECK_FUNCS(sync_file_range)])
+
 # Checks for typedefs, structures, and compiler characteristics.
 AC_C_CONST
+AC_SYS_LARGEFILE
 
 # Checks for library functions.
 AC_CHECK_FUNCS([memset])
 
+# Check for nonstandard STRERROR_R
+AC_FUNC_STRERROR_R
+
 AC_CONFIG_FILES([Makefile
                  src/org/apache/hadoop/io/compress/zlib/Makefile
+                 src/org/apache/hadoop/io/compress/snappy/Makefile
+                 src/org/apache/hadoop/io/nativeio/Makefile
+                 src/org/apache/hadoop/security/Makefile
                  lib/Makefile])
 AC_OUTPUT
 

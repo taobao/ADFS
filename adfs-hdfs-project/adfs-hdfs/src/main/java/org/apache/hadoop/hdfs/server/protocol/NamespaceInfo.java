@@ -37,7 +37,7 @@ import org.apache.hadoop.io.WritableFactory;
  */
 public class NamespaceInfo extends StorageInfo implements Writable {
   String  buildVersion;
-  //int distributedUpgradeVersion;
+  int distributedUpgradeVersion;
 
   public NamespaceInfo() {
     super();
@@ -47,21 +47,16 @@ public class NamespaceInfo extends StorageInfo implements Writable {
   public NamespaceInfo(int nsID, long cT, int duVersion) {
     super(FSConstants.LAYOUT_VERSION, nsID, cT);
     buildVersion = Storage.getBuildVersion();
-    //this.distributedUpgradeVersion = duVersion;
-  }
-  
-  public NamespaceInfo(int nsID, long cT) {
-    super(FSConstants.LAYOUT_VERSION, nsID, cT);
-    buildVersion = Storage.getBuildVersion();
+    this.distributedUpgradeVersion = duVersion;
   }
   
   public String getBuildVersion() {
     return buildVersion;
   }
 
-  /*public int getDistributedUpgradeVersion() {
+  public int getDistributedUpgradeVersion() {
     return distributedUpgradeVersion;
-  }*/
+  }
   
   /////////////////////////////////////////////////
   // Writable
@@ -79,7 +74,7 @@ public class NamespaceInfo extends StorageInfo implements Writable {
     out.writeInt(getLayoutVersion());
     out.writeInt(getNamespaceID());
     out.writeLong(getCTime());
-    //out.writeInt(getDistributedUpgradeVersion());
+    out.writeInt(getDistributedUpgradeVersion());
   }
 
   public void readFields(DataInput in) throws IOException {
@@ -87,6 +82,6 @@ public class NamespaceInfo extends StorageInfo implements Writable {
     layoutVersion = in.readInt();
     namespaceID = in.readInt();
     cTime = in.readLong();
-    //distributedUpgradeVersion = in.readInt();
+    distributedUpgradeVersion = in.readInt();
   }
 }

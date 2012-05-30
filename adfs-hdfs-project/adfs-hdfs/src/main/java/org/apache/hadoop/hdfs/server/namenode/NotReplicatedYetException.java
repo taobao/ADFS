@@ -24,7 +24,6 @@ import java.io.IOException;
  * The file has not finished being written to enough datanodes yet.
  */
 public class NotReplicatedYetException extends IOException {
-  private static final long serialVersionUID = -1622039735910833221L;
   public NotReplicatedYetException(String msg) {
     super(msg);
   }

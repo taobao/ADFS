@@ -25,6 +25,7 @@ import java.io.OutputStream;
 import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.security.Permission;
+import java.security.PrivilegedExceptionAction;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -34,6 +35,8 @@ import java.util.zip.GZIPOutputStream;
 
 import junit.framework.TestCase;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSInputChecker;
 import org.apache.hadoop.fs.FileSystem;
@@ -45,7 +48,6 @@ import org.apache.hadoop.hdfs.protocol.Block;
 import org.apache.hadoop.hdfs.server.datanode.DataNode;
 import org.apache.hadoop.hdfs.server.datanode.FSDataset;
 import org.apache.hadoop.io.IOUtils;
-import org.apache.hadoop.security.UnixUserGroupInformation;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.util.StringUtils;
 import org.apache.hadoop.util.ToolRunner;
@@ -54,6 +56,8 @@ import org.apache.hadoop.util.ToolRunner;
  * This class tests commands from DFSShell.
  */
 public class TestDFSShell extends TestCase {
+  private static final Log LOG = LogFactory.getLog(TestDFSShell.class);
+  
   static final String TEST_ROOT_DIR =
     new Path(System.getProperty("test.build.data","/tmp"))
     .toString().replace(' ', '+');
@@ -90,7 +94,7 @@ public class TestDFSShell extends TestCase {
 
   public void testZeroSizeFile() throws IOException {
     Configuration conf = new Configuration();
-    MiniMNDFSCluster cluster = new MiniMNDFSCluster(conf, 2, true, null);
+    MiniDFSCluster cluster = new MiniDFSCluster(conf, 2, true, null);
     FileSystem fs = cluster.getFileSystem();
     assertTrue("Not a HDFS: "+fs.getUri(),
                fs instanceof DistributedFileSystem);
@@ -132,7 +136,7 @@ public class TestDFSShell extends TestCase {
   
   public void testRecrusiveRm() throws IOException {
 	  Configuration conf = new Configuration();
-	  MiniMNDFSCluster cluster = new MiniMNDFSCluster(conf, 2, true, null);
+	  MiniDFSCluster cluster = new MiniDFSCluster(conf, 2, true, null);
 	  FileSystem fs = cluster.getFileSystem();
 	  assertTrue("Not a HDFS: " + fs.getUri(), 
 			  fs instanceof DistributedFileSystem);
@@ -157,7 +161,7 @@ public class TestDFSShell extends TestCase {
     
   public void testDu() throws IOException {
     Configuration conf = new Configuration();
-    MiniMNDFSCluster cluster = new MiniMNDFSCluster(conf, 2, true, null);
+    MiniDFSCluster cluster = new MiniDFSCluster(conf, 2, true, null);
     FileSystem fs = cluster.getFileSystem();
     assertTrue("Not a HDFS: "+fs.getUri(),
                 fs instanceof DistributedFileSystem);
@@ -206,7 +210,7 @@ public class TestDFSShell extends TestCase {
   }
   public void testPut() throws IOException {
     Configuration conf = new Configuration();
-    MiniMNDFSCluster cluster = new MiniMNDFSCluster(conf, 2, true, null);
+    MiniDFSCluster cluster = new MiniDFSCluster(conf, 2, true, null);
     FileSystem fs = cluster.getFileSystem();
     assertTrue("Not a HDFS: "+fs.getUri(),
                fs instanceof DistributedFileSystem);
@@ -302,10 +306,10 @@ public class TestDFSShell extends TestCase {
   /** check command error outputs and exit statuses. */
   public void testErrOutPut() throws Exception {
     Configuration conf = new Configuration();
-    MiniMNDFSCluster cluster = null;
+    MiniDFSCluster cluster = null;
     PrintStream bak = null;
     try {
-      cluster = new MiniMNDFSCluster(conf, 2, true, null);
+      cluster = new MiniDFSCluster(conf, 2, true, null);
       FileSystem srcFs = cluster.getFileSystem();
       Path root = new Path("/nonexistentfile");
       bak = System.err;
@@ -405,7 +409,7 @@ public class TestDFSShell extends TestCase {
       argv[1] = "/testfile";
       argv[2] = "file";
       ret = ToolRunner.run(shell, argv);
-      assertTrue("mv failed to rename", ret == 0);
+      assertTrue("mv failed to rename", ret == -1);
       out.reset();
       argv = new String[3];
       argv[0] = "-mv";
@@ -446,15 +450,15 @@ public class TestDFSShell extends TestCase {
   public void testURIPaths() throws Exception {
     Configuration srcConf = new Configuration();
     Configuration dstConf = new Configuration();
-    MiniMNDFSCluster srcCluster =  null;
-    MiniMNDFSCluster dstCluster = null;
+    MiniDFSCluster srcCluster =  null;
+    MiniDFSCluster dstCluster = null;
     String bak = System.getProperty("test.build.data");
     try{
-      srcCluster = new MiniMNDFSCluster(srcConf, 2, true, null);
+      srcCluster = new MiniDFSCluster(srcConf, 2, true, null);
       File nameDir = new File(new File(bak), "dfs_tmp_uri/");
       nameDir.mkdirs();
       System.setProperty("test.build.data", nameDir.toString());
-      dstCluster = new MiniMNDFSCluster(dstConf, 2, true, null);
+      dstCluster = new MiniDFSCluster(dstConf, 2, true, null);
       FileSystem srcFs = srcCluster.getFileSystem();
       FileSystem dstFs = dstCluster.getFileSystem();
       FsShell shell = new FsShell();
@@ -525,9 +529,7 @@ public class TestDFSShell extends TestCase {
       ret = ToolRunner.run(shell, argv);
       assertTrue("default works for rm/rmr", (ret ==0));
     } finally {
-      if(bak != null){
-	      System.setProperty("test.build.data", bak);
-      }
+      System.setProperty("test.build.data", bak);
       if (null != srcCluster) {
         srcCluster.shutdown();
       }
@@ -539,10 +541,10 @@ public class TestDFSShell extends TestCase {
 
   public void testText() throws Exception {
     Configuration conf = new Configuration();
-    MiniMNDFSCluster cluster = null;
+    MiniDFSCluster cluster = null;
     PrintStream bak = null;
     try {
-      cluster = new MiniMNDFSCluster(conf, 2, true, null);
+      cluster = new MiniDFSCluster(conf, 2, true, null);
       FileSystem fs = cluster.getFileSystem();
       Path root = new Path("/texttest");
       fs.mkdirs(root);
@@ -587,7 +589,7 @@ public class TestDFSShell extends TestCase {
      * Make sure that we create ChecksumDFS */
     conf.set("fs.hdfs.impl",
              "org.apache.hadoop.hdfs.ChecksumDistributedFileSystem");
-    MiniMNDFSCluster cluster = new MiniMNDFSCluster(conf, 2, true, null);
+    MiniDFSCluster cluster = new MiniDFSCluster(conf, 2, true, null);
     FileSystem fs = cluster.getFileSystem();
     assertTrue("Not a HDFS: "+fs.getUri(),
                fs instanceof ChecksumDistributedFileSystem);
@@ -682,9 +684,9 @@ public class TestDFSShell extends TestCase {
     return path;
   }
 
-  /*public void testCount() throws Exception {
+  public void testCount() throws Exception {
     Configuration conf = new Configuration();
-    MiniMNDFSCluster cluster = new MiniMNDFSCluster(conf, 2, true, null);
+    MiniDFSCluster cluster = new MiniDFSCluster(conf, 2, true, null);
     DistributedFileSystem dfs = (DistributedFileSystem)cluster.getFileSystem();
     FsShell shell = new FsShell();
     shell.setConf(conf);
@@ -714,7 +716,7 @@ public class TestDFSShell extends TestCase {
       }
       cluster.shutdown();
     }
-  }*/
+  }
   private void runCount(String path, long dirs, long files, Configuration conf
     ) throws IOException {
     ByteArrayOutputStream bytes = new ByteArrayOutputStream(); 
@@ -764,18 +766,15 @@ public class TestDFSShell extends TestCase {
      fs.delete(dir, true);
      fs.mkdirs(dir);
 
-     runCmd(shell, "-chmod", "u+rwx,g=rw,o-rwx", chmodDir);
-     assertEquals("rwxrw----",
-                  fs.getFileStatus(dir).getPermission().toString());
-
+     confirmPermissionChange(/* Setting */ "u+rwx,g=rw,o-rwx",
+                             /* Should give */ "rwxrw----", fs, shell, dir);
+     
      //create an empty file
      Path file = new Path(chmodDir, "file");
      TestDFSShell.writeFile(fs, file);
 
      //test octal mode
-     runCmd(shell, "-chmod", "644", file.toString());
-     assertEquals("rw-r--r--",
-                  fs.getFileStatus(file).getPermission().toString());
+     confirmPermissionChange( "644", "rw-r--r--", fs, shell, file);
 
      //test recursive
      runCmd(shell, "-chmod", "-R", "a+rwX", chmodDir);
@@ -783,8 +782,31 @@ public class TestDFSShell extends TestCase {
                   fs.getFileStatus(dir).getPermission().toString()); 
      assertEquals("rw-rw-rw-",
                   fs.getFileStatus(file).getPermission().toString());
+
+     // test sticky bit on directories
+     Path dir2 = new Path(dir, "stickybit" );
+     fs.mkdirs(dir2 );
+     LOG.info("Testing sticky bit on: " + dir2);
+     LOG.info("Sticky bit directory initial mode: " + 
+                   fs.getFileStatus(dir2).getPermission());
      
-     fs.delete(dir, true);     
+     confirmPermissionChange("u=rwx,g=rx,o=rx", "rwxr-xr-x", fs, shell, dir2);
+     
+     confirmPermissionChange("+t", "rwxr-xr-t", fs, shell, dir2);
+
+     confirmPermissionChange("-t", "rwxr-xr-x", fs, shell, dir2);
+
+     confirmPermissionChange("=t", "--------T", fs, shell, dir2);
+
+     confirmPermissionChange("0000", "---------", fs, shell, dir2);
+
+     confirmPermissionChange("1666", "rw-rw-rwT", fs, shell, dir2);
+
+     confirmPermissionChange("777", "rwxrwxrwt", fs, shell, dir2);
+     
+     fs.delete(dir2, true);
+     fs.delete(dir, true);
+     
     } finally {
       try {
         fs.close();
@@ -792,7 +814,20 @@ public class TestDFSShell extends TestCase {
       } catch (IOException ignored) {}
     }
   }
-  
+
+  // Apply a new permission to a path and confirm that the new permission
+  // is the one you were expecting
+  private void confirmPermissionChange(String toApply, String expected,
+      FileSystem fs, FsShell shell, Path dir2) throws IOException {
+    LOG.info("Confirming permission change of " + toApply + " to " + expected);
+    runCmd(shell, "-chmod", toApply, dir2.toString());
+
+    String result = fs.getFileStatus(dir2).getPermission().toString();
+
+    LOG.info("Permission change result: " + result);
+    assertEquals(expected, result);
+  }
+   
   private void confirmOwner(String owner, String group, 
                             FileSystem fs, Path... paths) throws IOException {
     for(Path path : paths) {
@@ -800,12 +835,12 @@ public class TestDFSShell extends TestCase {
         assertEquals(owner, fs.getFileStatus(path).getOwner());
       }
       if (group != null) {
-        //assertEquals(group, fs.getFileStatus(path).getGroup());
+        assertEquals(group, fs.getFileStatus(path).getGroup());
       }
     }
   }
   
-  /*public void testFilePermissions() throws IOException {
+  public void testFilePermissions() throws IOException {
     Configuration conf = new Configuration();
     
     //test chmod on local fs
@@ -816,7 +851,7 @@ public class TestDFSShell extends TestCase {
     conf.set("dfs.permissions", "true");
     
     //test chmod on DFS
-    MiniMNDFSCluster cluster = new MiniMNDFSCluster(conf, 2, true, null);
+    MiniDFSCluster cluster = new MiniDFSCluster(conf, 2, true, null);
     fs = cluster.getFileSystem();
     testChmod(conf, fs, "/tmp/chmodTest");
     
@@ -826,9 +861,9 @@ public class TestDFSShell extends TestCase {
     shell.setConf(conf);
     fs = cluster.getFileSystem();
     
-     For dfs, I am the super user and I can change ower of any file to
+    /* For dfs, I am the super user and I can change owner of any file to
      * anything. "-R" option is already tested by chmod test above.
-     
+     */
     
     String file = "/tmp/chownTest";
     Path path = new Path(file);
@@ -866,7 +901,7 @@ public class TestDFSShell extends TestCase {
     confirmOwner(null, "hadoop-core@apache.org/100", fs, path);
     
     cluster.shutdown();
-  }*/
+  }
   /**
    * Tests various options of DFSShell.
    */
@@ -876,7 +911,7 @@ public class TestDFSShell extends TestCase {
      * Make sure that we create ChecksumDFS */
     conf.set("fs.hdfs.impl",
              "org.apache.hadoop.hdfs.ChecksumDistributedFileSystem");
-    MiniMNDFSCluster cluster = new MiniMNDFSCluster(conf, 3, true, null);
+    MiniDFSCluster cluster = new MiniDFSCluster(conf, 2, true, null);
     FileSystem fs = cluster.getFileSystem();
     assertTrue("Not a HDFS: "+fs.getUri(),
             fs instanceof ChecksumDistributedFileSystem);
@@ -1113,7 +1148,8 @@ public class TestDFSShell extends TestCase {
     }
   }
 
-  static List<File> getBlockFiles(MiniMNDFSCluster cluster) throws IOException {
+  static List<File> getBlockFiles(MiniDFSCluster cluster) 
+      throws IOException, InterruptedException {
     List<File> files = new ArrayList<File>();
     List<DataNode> datanodes = cluster.getDataNodes();
     Block[][] blocks = cluster.getAllBlockReports();
@@ -1143,33 +1179,37 @@ public class TestDFSShell extends TestCase {
   }
 
   public void testRemoteException() throws Exception {
-    UnixUserGroupInformation tmpUGI = new UnixUserGroupInformation("tmpname",
-        new String[] {
-        "mygroup"});
-    MiniMNDFSCluster dfs = null;
+    UserGroupInformation tmpUGI = 
+      UserGroupInformation.createUserForTesting("tmpname", new String[] {"mygroup"});
+    MiniDFSCluster dfs = null;
     PrintStream bak = null;
     try {
-      Configuration conf = new Configuration();
-      dfs = new MiniMNDFSCluster(conf, 2, true, null);
+      final Configuration conf = new Configuration();
+      dfs = new MiniDFSCluster(conf, 2, true, null);
       FileSystem fs = dfs.getFileSystem();
       Path p = new Path("/foo");
       fs.mkdirs(p);
       fs.setPermission(p, new FsPermission((short)0700));
-      UnixUserGroupInformation.saveToConf(conf,
-          UnixUserGroupInformation.UGI_PROPERTY_NAME, tmpUGI);
-      FsShell fshell = new FsShell(conf);
       bak = System.err;
-      ByteArrayOutputStream out = new ByteArrayOutputStream();
-      PrintStream tmp = new PrintStream(out);
-      System.setErr(tmp);
-      String[] args = new String[2];
-      args[0] = "-ls";
-      args[1] = "/foo";
-      int ret = ToolRunner.run(fshell, args);
-      assertTrue("returned should be 0", (ret == 0));
-      String str = out.toString();
-      //assertTrue("permission denied printed", str.indexOf("Permission denied") != -1);
-      out.reset();
+      
+      tmpUGI.doAs(new PrivilegedExceptionAction<Object>() {
+        @Override
+        public Object run() throws Exception {
+          FsShell fshell = new FsShell(conf);
+          ByteArrayOutputStream out = new ByteArrayOutputStream();
+          PrintStream tmp = new PrintStream(out);
+          System.setErr(tmp);
+          String[] args = new String[2];
+          args[0] = "-ls";
+          args[1] = "/foo";
+          int ret = ToolRunner.run(fshell, args);
+          assertTrue("returned should be -1", (ret == -1));
+          String str = out.toString();
+          assertTrue("permission denied printed", str.indexOf("Permission denied") != -1);
+          out.reset();
+          return null;
+        }
+      });
     } finally {
       if (bak != null) {
         System.setErr(bak);
@@ -1180,10 +1220,10 @@ public class TestDFSShell extends TestCase {
     }
   }
   
-  public void testGet() throws IOException {
+  public void testGet() throws IOException, InterruptedException {
     DFSTestUtil.setLogLevel2All(FSInputChecker.LOG);
     final Configuration conf = new Configuration();
-    MiniMNDFSCluster cluster = new MiniMNDFSCluster(conf, 2, true, null);
+    MiniDFSCluster cluster = new MiniDFSCluster(conf, 2, true, null);
     DistributedFileSystem dfs = (DistributedFileSystem)cluster.getFileSystem();
 
     try {
@@ -1240,8 +1280,8 @@ public class TestDFSShell extends TestCase {
   }
 
   public void testLsr() throws Exception {
-    Configuration conf = new Configuration();
-    MiniMNDFSCluster cluster = new MiniMNDFSCluster(conf, 2, true, null);
+    final Configuration conf = new Configuration();
+    MiniDFSCluster cluster = new MiniDFSCluster(conf, 2, true, null);
     DistributedFileSystem dfs = (DistributedFileSystem)cluster.getFileSystem();
 
     try {
@@ -1253,13 +1293,16 @@ public class TestDFSShell extends TestCase {
       final Path sub = new Path(root, "sub");
       dfs.setPermission(sub, new FsPermission((short)0));
 
-      final UserGroupInformation ugi = UserGroupInformation.getCurrentUGI();
-      final String tmpusername = ugi.getUserName() + "1";
-      UnixUserGroupInformation tmpUGI = new UnixUserGroupInformation(
+      final UserGroupInformation ugi = UserGroupInformation.getCurrentUser();
+      final String tmpusername = ugi.getShortUserName() + "1";
+      UserGroupInformation tmpUGI = UserGroupInformation.createUserForTesting(
           tmpusername, new String[] {tmpusername});
-      UnixUserGroupInformation.saveToConf(conf,
-            UnixUserGroupInformation.UGI_PROPERTY_NAME, tmpUGI);
-      String results = runLsr(new FsShell(conf), root, 0);
+      String results = tmpUGI.doAs(new PrivilegedExceptionAction<String>() {
+        @Override
+        public String run() throws Exception {
+          return runLsr(new FsShell(conf), root, -1);
+        }
+      });
       assertTrue(results.contains("zzz"));
     } finally {
       cluster.shutdown();

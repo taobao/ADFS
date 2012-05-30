@@ -20,10 +20,13 @@ package org.apache.hadoop.hdfs.server.protocol;
 
 import java.io.*;
 
+import org.apache.hadoop.hdfs.DFSConfigKeys;
 import org.apache.hadoop.hdfs.protocol.Block;
 import org.apache.hadoop.hdfs.protocol.DatanodeID;
 import org.apache.hadoop.hdfs.protocol.LocatedBlock;
 import org.apache.hadoop.ipc.VersionedProtocol;
+
+import org.apache.hadoop.security.KerberosInfo;
 
 /**********************************************************************
  * Protocol that a DFS datanode uses to communicate with the NameNode.
@@ -33,13 +36,16 @@ import org.apache.hadoop.ipc.VersionedProtocol;
  * returning values from these functions.
  *
  **********************************************************************/
+@KerberosInfo(
+    serverPrincipal = DFSConfigKeys.DFS_NAMENODE_USER_NAME_KEY, 
+    clientPrincipal = DFSConfigKeys.DFS_DATANODE_USER_NAME_KEY)
 public interface DatanodeProtocol extends VersionedProtocol {
   /**
-   * 19: SendHeartbeat returns an array of DatanodeCommand objects
-   *     in stead of a DatanodeCommand object.
+   * 27: nextGenerationStamp has a new parameter indicating if it is for
+   * NameNode initiated lease recovery or not
    */
-  public static final long versionID = 19L;
-  
+  public static final long versionID = 27L;
+
   // error code
   final static int NOTIFY = 0;
   final static int DISK_ERROR = 1; // there are still valid volumes on DN
@@ -57,6 +63,7 @@ public interface DatanodeProtocol extends VersionedProtocol {
   final static int DNA_REGISTER = 4;   // re-register
   final static int DNA_FINALIZE = 5;   // finalize previous upgrade
   final static int DNA_RECOVERBLOCK = 6;  // request a block recovery
+  final static int DNA_ACCESSKEYUPDATE = 7;  // update access key
 
   /** 
    * Register Datanode.
@@ -82,7 +89,8 @@ public interface DatanodeProtocol extends VersionedProtocol {
                                        long capacity,
                                        long dfsUsed, long remaining,
                                        int xmitsInProgress,
-                                       int xceiverCount) throws IOException;
+                                       int xceiverCount,
+                                       int failedVolumes) throws IOException;
 
   /**
    * blockReport() tells the NameNode about all the locally-stored blocks.
@@ -151,17 +159,17 @@ public interface DatanodeProtocol extends VersionedProtocol {
    * }
    */
   public void reportBadBlocks(LocatedBlock[] blocks) throws IOException;
-  
+
   /**
+   * @return the next GenerationStamp to be associated with the specified
    * Get the next GenerationStamp to be associated with the specified
    * block.
-   * 
+   *
    * @param block block
    * @param fromNN if it is for lease recovery initiated by NameNode
    * @return a new generation stamp
    */
   public long nextGenerationStamp(Block block, boolean fromNN) throws IOException;
-
 
   /**
    * Commit block synchronization in lease recovery

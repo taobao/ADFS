@@ -8,31 +8,37 @@
   import="org.apache.hadoop.hdfs.*"
   import="org.apache.hadoop.hdfs.server.namenode.*"
   import="org.apache.hadoop.hdfs.server.datanode.*"
+  import="org.apache.hadoop.hdfs.server.common.*"
   import="org.apache.hadoop.hdfs.protocol.*"
   import="org.apache.hadoop.io.*"
   import="org.apache.hadoop.conf.*"
   import="org.apache.hadoop.net.DNS"
+  import="org.apache.hadoop.security.token.Token"
+  import="org.apache.hadoop.hdfs.security.token.block.BlockTokenIdentifier"
   import="org.apache.hadoop.util.*"
   import="org.apache.hadoop.net.NetUtils"
+  import="org.apache.hadoop.security.UserGroupInformation"
+  import="org.apache.hadoop.http.HtmlQuoting"
   import="java.text.DateFormat"
 %>
 
 <%!
   static JspHelper jspHelper = new JspHelper();
 
-  public void generateFileChunks(JspWriter out, HttpServletRequest req) 
-    throws IOException {
+  public void generateFileChunks(JspWriter out, HttpServletRequest req,
+                                 Configuration conf
+                                ) throws IOException, InterruptedException {
     long startOffset = 0;
     
     int chunkSizeToView = 0;
-
+    String tokenString = req.getParameter(JspHelper.DELEGATION_PARAMETER_NAME);
     String referrer = req.getParameter("referrer");
     boolean noLink = false;
     if (referrer == null) {
       noLink = true;
     }
 
-    String filename = req.getParameter("filename");
+    String filename = HtmlQuoting.unquoteHtmlChars(req.getParameter("filename"));
     if (filename == null) {
       out.print("Invalid input (file name absent)");
       return;
@@ -46,23 +52,24 @@
     String chunkSizeToViewStr = req.getParameter("chunkSizeToView");
     if (chunkSizeToViewStr != null && Integer.parseInt(chunkSizeToViewStr) > 0)
       chunkSizeToView = Integer.parseInt(chunkSizeToViewStr);
-    else chunkSizeToView = jspHelper.defaultChunkSizeToView;
+    else chunkSizeToView = JspHelper.getDefaultChunkSize(conf);
 
     if (!noLink) {
       out.print("<h3>Tail of File: ");
-      JspHelper.printPathWithLinks(filename, out, namenodeInfoPort);
-	    out.print("</h3><hr>");
+      JspHelper.printPathWithLinks(HtmlQuoting.quoteHtmlChars(filename),
+                                   out, namenodeInfoPort, tokenString);
+      out.print("</h3><hr>");
       out.print("<a href=\"" + referrer + "\">Go Back to File View</a><hr>");
     }
     else {
-      out.print("<h3>" + filename + "</h3>");
+      out.print("<h3>" + HtmlQuoting.quoteHtmlChars(filename) + "</h3>");
     }
     out.print("<b>Chunk size to view (in bytes, up to file's DFS block size): </b>");
     out.print("<input type=\"text\" name=\"chunkSizeToView\" value=" +
               chunkSizeToView + " size=10 maxlength=10>");
     out.print("&nbsp;&nbsp;<input type=\"submit\" name=\"submit\" value=\"Refresh\"><hr>");
-    out.print("<input type=\"hidden\" name=\"filename\" value=\"" + filename +
-              "\">");
+    out.print("<input type=\"hidden\" name=\"filename\" value=\"" + 
+              HtmlQuoting.quoteHtmlChars(filename) + "\">");
     out.print("<input type=\"hidden\" name=\"namenodeInfoPort\" value=\"" + namenodeInfoPort +
     "\">");
     if (!noLink)
@@ -70,10 +77,11 @@
                 referrer+ "\">");
 
     //fetch the block from the datanode that has the last block for this file
-    DFSClient dfs = new DFSClient(jspHelper.nameNodeAddr, 
-                                         jspHelper.conf);
+    UserGroupInformation ugi = JspHelper.getUGI(req, conf);
+    DFSClient dfs = JspHelper.getDFSClient(ugi, jspHelper.nameNodeAddr, conf);
     List<LocatedBlock> blocks = 
-      dfs.namenode.getBlockLocations(filename, 0, Long.MAX_VALUE).getLocatedBlocks();
+      dfs.namenode.getBlockLocations(filename, 0, Long.MAX_VALUE
+                                     ).getLocatedBlocks();
     if (blocks == null || blocks.size() == 0) {
       out.print("No datanodes contain blocks of file "+filename);
       dfs.close();
@@ -82,6 +90,7 @@
     LocatedBlock lastBlk = blocks.get(blocks.size() - 1);
     long blockSize = lastBlk.getBlock().getNumBytes();
     long blockId = lastBlk.getBlock().getBlockId();
+    Token<BlockTokenIdentifier> accessToken = lastBlk.getBlockToken();
     long genStamp = lastBlk.getBlock().getGenerationStamp();
     DatanodeInfo chosenNode;
     try {
@@ -98,7 +107,9 @@
     else startOffset = 0;
 
     out.print("<textarea cols=\"100\" rows=\"25\" wrap=\"virtual\" style=\"width:100%\" READONLY>");
-    jspHelper.streamBlockInAscii(addr, blockId, genStamp, blockSize, startOffset, chunkSizeToView, out);
+    jspHelper.streamBlockInAscii(addr, blockId, accessToken, genStamp, 
+                                 blockSize, startOffset, chunkSizeToView, 
+                                 out, conf);
     out.print("</textarea>");
     dfs.close();
   }
@@ -116,7 +127,9 @@
 <body>
 <form action="/tail.jsp" method="GET">
 <% 
-   generateFileChunks(out,request);
+   Configuration conf = 
+     (Configuration) application.getAttribute(JspHelper.CURRENT_CONF);
+   generateFileChunks(out, request, conf);
 %>
 </form>
 <hr>

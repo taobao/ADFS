@@ -12,11 +12,12 @@
   See the License for the specific language governing permissions and
   limitations under the License. See accompanying LICENSE file.
 -->
-<project>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
   <modelVersion>4.0.0</modelVersion>
   <groupId>com.taobao.adfs</groupId>
   <artifactId>adfs-main</artifactId>
-  <version>0.2.1</version>
+  <version>0.3.0</version>
   <description>ADFS Main POM</description>
   <name>ADFS Main POM</name>
   <packaging>pom</packaging>
@@ -77,13 +78,7 @@
     <module>adfs-project-dist</module>
     <module>adfs-assemblies</module>
     <module>adfs-common-project</module>
-    <module>adfs-distributed-project</module>
-    <module>adfs-state-project</module>
     <module>adfs-hdfs-project</module>
-    <module>adfs-mapreduce-project</module>
-    <module>adfs-tools-project</module>
-    <module>adfs-examples-project</module>
-    <module>adfs-misc-project</module>
     <module>adfs-dist</module>
   </modules>
 
@@ -291,6 +286,5 @@
         </plugins>
       </build>
     </profile>
-
   </profiles>
 </project>

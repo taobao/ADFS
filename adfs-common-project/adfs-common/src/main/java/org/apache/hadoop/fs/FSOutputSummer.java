@@ -22,8 +22,6 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.util.zip.Checksum;
 
-import org.mortbay.log.Log;
-
 /**
  * This is a generic output stream for generating checksums for
  * data before it is written to the underlying stream
@@ -87,7 +85,6 @@ abstract public class FSOutputSummer extends OutputStream {
 
     for (int n=0;n<len;n+=write1(b, off+n, len-n)) {
     }
-    incMetrics(len);
   }
   
   /**
@@ -176,9 +173,4 @@ abstract public class FSOutputSummer extends OutputStream {
     this.buf = new byte[size];
     this.count = 0;
   }
-  
-  /**
-   * overrided in DFSOutputStream, to collect information for DFSClientMetrics
-   */
-  protected void incMetrics(int len) {}
 }

@@ -17,10 +17,6 @@
 #
 
 #
-# Top-level makefile template for native hadoop code
-#
-
-#
 # Notes: 
 # 1. This makefile is designed to do the actual builds in $(HADOOP_HOME)/build/native/${os.name}-${os-arch}.
 # 2. This makefile depends on the following environment variables to function correctly:
@@ -36,10 +32,16 @@
 export PLATFORM = $(shell echo $$OS_NAME | tr [A-Z] [a-z])
 
 # List the sub-directories here
-SUBDIRS = src/org/apache/hadoop/io/compress/zlib lib
+SUBDIRS = src/org/apache/hadoop/io/compress/zlib \
+	src/org/apache/hadoop/io/compress/snappy \
+	src/org/apache/hadoop/io/nativeio \
+	src/org/apache/hadoop/security \
+	lib
 
 # The following export is needed to build libhadoop.so in the 'lib' directory
 export SUBDIRS
+
+ACLOCAL_AMFLAGS = -I m4
 
 #
 #vim: sw=4: ts=4: noet

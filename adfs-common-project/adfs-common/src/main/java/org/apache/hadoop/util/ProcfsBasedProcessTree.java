@@ -29,39 +29,73 @@ import java.util.Map;
 import java.util.HashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.Arrays;
 import java.util.LinkedList;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-
-import org.apache.hadoop.util.Shell.ExitCodeException;
 import org.apache.hadoop.util.Shell.ShellCommandExecutor;
 
 /**
  * A Proc file-system based ProcessTree. Works only on Linux.
  */
-public class ProcfsBasedProcessTree {
+public class ProcfsBasedProcessTree extends ProcessTree {
 
-  private static final Log LOG = LogFactory
-      .getLog("org.apache.hadoop.mapred.ProcfsBasedProcessTree");
+  static final Log LOG = LogFactory
+      .getLog(ProcfsBasedProcessTree.class);
 
   private static final String PROCFS = "/proc/";
-  public static final long DEFAULT_SLEEPTIME_BEFORE_SIGKILL = 5000L;
-  private long sleepTimeBeforeSigKill = DEFAULT_SLEEPTIME_BEFORE_SIGKILL;
-  private static final Pattern PROCFS_STAT_FILE_FORMAT = Pattern
-      .compile("^([0-9-]+)\\s([^\\s]+)\\s[^\\s]\\s([0-9-]+)\\s([0-9-]+)\\s([0-9-]+)\\s([0-9-]+\\s){16}([0-9]+)(\\s[0-9-]+){16}");
+  private static final Pattern PROCFS_STAT_FILE_FORMAT = Pattern .compile(
+    "^([0-9-]+)\\s([^\\s]+)\\s[^\\s]\\s([0-9-]+)\\s([0-9-]+)\\s([0-9-]+)\\s" +
+    "([0-9-]+\\s){7}([0-9]+)\\s([0-9]+)\\s([0-9-]+\\s){7}([0-9]+)\\s([0-9]+)" +
+    "(\\s[0-9-]+){15}");
+
+  static final String PROCFS_STAT_FILE = "stat";
+  static final String PROCFS_CMDLINE_FILE = "cmdline";
+  public static final long PAGE_SIZE;
+  static {
+    ShellCommandExecutor shellExecutor =
+            new ShellCommandExecutor(new String[]{"getconf",  "PAGESIZE"});
+    long pageSize = -1;
+    try {
+      shellExecutor.execute();
+      pageSize = Long.parseLong(shellExecutor.getOutput().replace("\n", ""));
+    } catch (IOException e) {
+      LOG.error(StringUtils.stringifyException(e));
+    } finally {
+      PAGE_SIZE = pageSize;
+    }
+  }
+  public static final long JIFFY_LENGTH_IN_MILLIS; // in millisecond
+  static {
+    ShellCommandExecutor shellExecutor =
+            new ShellCommandExecutor(new String[]{"getconf",  "CLK_TCK"});
+    long jiffiesPerSecond = -1;
+    try {
+      shellExecutor.execute();
+      jiffiesPerSecond = Long.parseLong(shellExecutor.getOutput().replace("\n", ""));
+    } catch (IOException e) {
+      LOG.error(StringUtils.stringifyException(e));
+    } finally {
+      JIFFY_LENGTH_IN_MILLIS = jiffiesPerSecond != -1 ?
+                     Math.round(1000D / jiffiesPerSecond) : -1;
+    }
+  }
 
   // to enable testing, using this variable which can be configured
   // to a test directory.
   private String procfsDir;
   
   private Integer pid = -1;
+  private Long cpuTime = 0L;
 
   private Map<Integer, ProcessInfo> processTree = new HashMap<Integer, ProcessInfo>();
 
   public ProcfsBasedProcessTree(String pid) {
-    this(pid, PROCFS);
+    this(pid, false);
+  }
+  
+  public ProcfsBasedProcessTree(String pid, boolean setsidUsed) {
+    this(pid,PROCFS);
   }
 
   public ProcfsBasedProcessTree(String pid, String procfsDir) {
@@ -69,10 +103,6 @@ public class ProcfsBasedProcessTree {
     this.procfsDir = procfsDir;
   }
   
-  public void setSigKillInterval(long interval) {
-    sleepTimeBeforeSigKill = interval;
-  }
-
   /**
    * Checks if the ProcfsBasedProcessTree is available on this system.
    * 
@@ -151,11 +181,12 @@ public class ProcfsBasedProcessTree {
         pInfoQueue.addAll(pInfo.getChildren());
       }
 
-      // update age values.
+      // update age values and compute the number of jiffies since last update
       for (Map.Entry<Integer, ProcessInfo> procs : processTree.entrySet()) {
         ProcessInfo oldInfo = oldProcs.get(procs.getKey());
-        if (oldInfo != null) {
-          if (procs.getValue() != null) {
+        if (procs.getValue() != null) {
+          procs.getValue().updateJiffy(oldInfo);
+          if (oldInfo != null) {
             procs.getValue().updateAge(oldInfo);  
           }
         }
@@ -170,47 +201,57 @@ public class ProcfsBasedProcessTree {
   }
 
   /**
-   * Is the process-tree alive? Currently we care only about the status of the
-   * root-process.
+   * Is the root-process alive?
    * 
-   * @return true if the process-true is alive, false otherwise.
+   * @return true if the root-process is alive, false otherwise.
    */
   public boolean isAlive() {
     if (pid == -1) {
       return false;
     } else {
-      return this.isAlive(pid);
+      return isAlive(pid.toString());
     }
   }
 
   /**
-   * Destroy the process-tree. Currently we only make sure the root process is
-   * gone. It is the responsibility of the root process to make sure that all
-   * its descendants are cleaned up.
+   * Is any of the subprocesses in the process-tree alive?
+   * 
+   * @return true if any of the processes in the process-tree is
+   *           alive, false otherwise.
    */
-  public void destroy() {
-    LOG.debug("Killing ProcfsBasedProcessTree of " + pid);
-    if (pid == -1) {
-      return;
-    }
-    ShellCommandExecutor shexec = null;
-
-    if (isAlive(this.pid)) {
-      try {
-        String[] args = { "kill", this.pid.toString() };
-        shexec = new ShellCommandExecutor(args);
-        shexec.execute();
-      } catch (IOException ioe) {
-        LOG.warn("Error executing shell command " + ioe);
-      } finally {
-        LOG.info("Killing " + pid + " with SIGTERM. Exit code "
-            + shexec.getExitCode());
+  public boolean isAnyProcessInTreeAlive() {
+    for (Integer pId : processTree.keySet()) {
+      if (isAlive(pId.toString())) {
+        return true;
       }
     }
+    return false;
+  }
 
-    SigKillThread sigKillThread = new SigKillThread();
-    sigKillThread.setDaemon(true);
-    sigKillThread.start();
+  private static final String PROCESSTREE_DUMP_FORMAT =
+      "\t|- %d %d %d %d %s %d %d %d %d %s\n";
+
+  /**
+   * Get a dump of the process-tree.
+   * 
+   * @return a string concatenating the dump of information of all the processes
+   *         in the process-tree
+   */
+  public String getProcessTreeDump() {
+    StringBuilder ret = new StringBuilder();
+    // The header.
+    ret.append(String.format("\t|- PID PPID PGRPID SESSID CMD_NAME "
+        + "USER_MODE_TIME(MILLIS) SYSTEM_TIME(MILLIS) VMEM_USAGE(BYTES) "
+        + "RSSMEM_USAGE(PAGES) FULL_CMD_LINE\n"));
+    for (ProcessInfo p : processTree.values()) {
+      if (p != null) {
+        ret.append(String.format(PROCESSTREE_DUMP_FORMAT, p.getPid(), p
+            .getPpid(), p.getPgrpId(), p.getSessionId(), p.getName(), p
+            .getUtime(), p.getStime(), p.getVmem(), p.getRssmemPage(), p
+            .getCmdLine(procfsDir)));
+      }
+    }
+    return ret.toString();
   }
 
   /**
@@ -222,6 +263,18 @@ public class ProcfsBasedProcessTree {
   public long getCumulativeVmem() {
     // include all processes.. all processes will be older than 0.
     return getCumulativeVmem(0);
+  }
+
+  /**
+   * Get the cumulative resident set size (rss) memory used by all the processes
+   * in the process-tree.
+   *
+   * @return cumulative rss memory used by the process-tree in bytes. return 0
+   *         if it cannot be calculated
+   */
+  public long getCumulativeRssmem() {
+    // include all processes.. all processes will be older than 0.
+    return getCumulativeRssmem(0);
   }
 
   /**
@@ -244,51 +297,50 @@ public class ProcfsBasedProcessTree {
   }
 
   /**
-   * Get PID from a pid-file.
-   * 
-   * @param pidFileName
-   *          Name of the pid-file.
-   * @return the PID string read from the pid-file. Returns null if the
-   *         pidFileName points to a non-existing file or if read fails from the
-   *         file.
+   * Get the cumulative resident set size (rss) memory used by all the processes
+   * in the process-tree that are older than the passed in age.
+   *
+   * @param olderThanAge processes above this age are included in the
+   *                      memory addition
+   * @return cumulative rss memory used by the process-tree in bytes,
+   *          for processes older than this age. return 0 if it cannot be
+   *          calculated
    */
-  public static String getPidFromPidFile(String pidFileName) {
-    BufferedReader pidFile = null;
-    FileReader fReader = null;
-    String pid = null;
-
-    try {
-      fReader = new FileReader(pidFileName);
-      pidFile = new BufferedReader(fReader);
-    } catch (FileNotFoundException f) {
-      LOG.debug("PidFile doesn't exist : " + pidFileName);
-      return pid;
+  public long getCumulativeRssmem(int olderThanAge) {
+    if (PAGE_SIZE < 0) {
+      return 0;
     }
-
-    try {
-      pid = pidFile.readLine();
-    } catch (IOException i) {
-      LOG.error("Failed to read from " + pidFileName);
-    } finally {
-      try {
-        if (fReader != null) {
-          fReader.close();
-        }
-        try {
-          if (pidFile != null) {
-            pidFile.close();
-          }
-        } catch (IOException i) {
-          LOG.warn("Error closing the stream " + pidFile);
-        }
-      } catch (IOException i) {
-        LOG.warn("Error closing the stream " + fReader);
+    long totalPages = 0;
+    for (ProcessInfo p : processTree.values()) {
+      if ((p != null) && (p.getAge() > olderThanAge)) {
+        totalPages += p.getRssmemPage();
       }
     }
-    return pid;
+    return totalPages * PAGE_SIZE; // convert # pages to byte
   }
 
-  private Integer getValidPID(String pid) {
+  /**
+   * Get the CPU time in millisecond used by all the processes in the
+   * process-tree since the process-tree created
+   *
+   * @return cumulative CPU time in millisecond since the process-tree created
+   *         return 0 if it cannot be calculated
+   */
+  public long getCumulativeCpuTime() {
+    if (JIFFY_LENGTH_IN_MILLIS < 0) {
+      return 0;
+    }
+    long incJiffies = 0;
+    for (ProcessInfo p : processTree.values()) {
+      if (p != null) {
+        incJiffies += p.dtime;
+      }
+    }
+    cpuTime += incJiffies * JIFFY_LENGTH_IN_MILLIS;
+    return cpuTime;
+  }
+
+  private static Integer getValidPID(String pid) {
     Integer retPid = -1;
     try {
       retPid = Integer.parseInt((String) pid);
@@ -308,28 +360,21 @@ public class ProcfsBasedProcessTree {
     String[] processDirs = (new File(procfsDir)).list();
     List<Integer> processList = new ArrayList<Integer>();
 
-    for (String dir : processDirs) {
-      try {
-        int pd = Integer.parseInt(dir);
-        if ((new File(procfsDir, dir)).isDirectory()) {
-          processList.add(Integer.valueOf(pd));
+    if (processDirs != null) {
+      for (String dir : processDirs) {
+        try {
+          int pd = Integer.parseInt(dir);
+          if ((new File(procfsDir, dir)).isDirectory()) {
+            processList.add(Integer.valueOf(pd));
+          }
+        } catch (NumberFormatException n) {
+          // skip this directory
+        } catch (SecurityException s) {
+          // skip this process
         }
-      } catch (NumberFormatException n) {
-        // skip this directory
-      } catch (SecurityException s) {
-        // skip this process
       }
     }
     return processList;
-  }
-
-  /**
-   * 
-   * Construct the ProcessInfo using the process' PID and procfs and return the
-   * same. Returns null on failing to read from procfs,
-   */
-  private ProcessInfo constructProcessInfo(ProcessInfo pinfo) {
-    return constructProcessInfo(pinfo, PROCFS);
   }
 
   /**
@@ -343,7 +388,7 @@ public class ProcfsBasedProcessTree {
    * @param procfsDir root of the proc file system
    * @return updated ProcessInfo, null on errors.
    */
-  private ProcessInfo constructProcessInfo(ProcessInfo pinfo, 
+  private static ProcessInfo constructProcessInfo(ProcessInfo pinfo, 
                                                     String procfsDir) {
     ProcessInfo ret = null;
     // Read "procfsDir/<pid>/stat" file
@@ -351,7 +396,7 @@ public class ProcfsBasedProcessTree {
     FileReader fReader = null;
     try {
       File pidDir = new File(procfsDir, String.valueOf(pinfo.getPid()));
-      fReader = new FileReader(new File(pidDir, "/stat"));
+      fReader = new FileReader(new File(pidDir, PROCFS_STAT_FILE));
       in = new BufferedReader(fReader);
     } catch (FileNotFoundException f) {
       // The process vanished in the interim!
@@ -364,10 +409,11 @@ public class ProcfsBasedProcessTree {
       Matcher m = PROCFS_STAT_FILE_FORMAT.matcher(str);
       boolean mat = m.find();
       if (mat) {
-        // Set ( name ) ( ppid ) ( pgrpId ) (session ) (vsize )
-        pinfo.updateProcessInfo(m.group(2), Integer.parseInt(m.group(3)), Integer
-            .parseInt(m.group(4)), Integer.parseInt(m.group(5)), Long
-            .parseLong(m.group(7)));
+        // Set (name) (ppid) (pgrpId) (session) (utime) (stime) (vsize) (rss)
+         pinfo.updateProcessInfo(m.group(2), Integer.parseInt(m.group(3)),
+                 Integer.parseInt(m.group(4)), Integer.parseInt(m.group(5)),
+                 Long.parseLong(m.group(7)), Long.parseLong(m.group(8)),
+                 Long.parseLong(m.group(10)), Long.parseLong(m.group(11)));
       }
     } catch (IOException io) {
       LOG.warn("Error reading the stream " + io);
@@ -375,13 +421,9 @@ public class ProcfsBasedProcessTree {
     } finally {
       // Close the streams
       try {
-        if (fReader != null) {
-          fReader.close();
-        }
+        fReader.close();
         try {
-          if (in != null) {
-            in.close();
-          }
+          in.close();
         } catch (IOException i) {
           LOG.warn("Error closing the stream " + in);
         }
@@ -393,58 +435,6 @@ public class ProcfsBasedProcessTree {
     return ret;
   }
   
-  /**
-   * Is the process with PID pid still alive?
-   */
-  private boolean isAlive(Integer pid) {
-    // This method assumes that isAlive is called on a pid that was alive not
-    // too long ago, and hence assumes no chance of pid-wrapping-around.
-    ShellCommandExecutor shexec = null;
-    try {
-      String[] args = { "kill", "-0", pid.toString() };
-      shexec = new ShellCommandExecutor(args);
-      shexec.execute();
-    } catch (ExitCodeException ee) {
-      return false;
-    } catch (IOException ioe) {
-      LOG.warn("Error executing shell command "
-          + Arrays.toString(shexec.getExecString()) + ioe);
-      return false;
-    }
-    return (shexec.getExitCode() == 0 ? true : false);
-  }
-
-  /**
-   * Helper thread class that kills process-tree with SIGKILL in background
-   */
-  private class SigKillThread extends Thread {
-
-    public void run() {
-      this.setName(this.getClass().getName() + "-" + String.valueOf(pid));
-      ShellCommandExecutor shexec = null;
-
-      try {
-        // Sleep for some time before sending SIGKILL
-        Thread.sleep(sleepTimeBeforeSigKill);
-      } catch (InterruptedException i) {
-        LOG.warn("Thread sleep is interrupted.");
-      }
-
-      // Kill the root process with SIGKILL if it is still alive
-      if (ProcfsBasedProcessTree.this.isAlive(pid)) {
-        try {
-          String[] args = { "kill", "-9", pid.toString() };
-          shexec = new ShellCommandExecutor(args);
-          shexec.execute();
-        } catch (IOException ioe) {
-          LOG.warn("Error executing shell command " + ioe);
-        } finally {
-          LOG.info("Killing " + pid + " with SIGKILL. Exit code "
-              + shexec.getExitCode());
-        }
-      }
-    }
-  }
   /**
    * Returns a string printing PIDs of process present in the
    * ProcfsBasedProcessTree. Output format : [pid pid ..]
@@ -470,8 +460,18 @@ public class ProcfsBasedProcessTree {
     private Integer ppid; // parent process-id
     private Integer sessionId; // session-id
     private Long vmem; // virtual memory usage
+    private Long rssmemPage; // rss memory usage in # of pages
+    private Long utime = 0L; // # of jiffies in user mode
+    private Long stime = 0L; // # of jiffies in kernel mode
     // how many times has this process been seen alive
     private int age; 
+
+    // # of jiffies used since last update:
+    private Long dtime = 0L;
+    // dtime = (utime + stime) - (utimeOld + stimeOld)
+    // We need this to compute the cumulative CPU time
+    // because the subprocess may finish earlier than root process
+
     private List<ProcessInfo> children = new ArrayList<ProcessInfo>(); // list of children
 
     public ProcessInfo(int pid) {
@@ -504,24 +504,41 @@ public class ProcfsBasedProcessTree {
       return vmem;
     }
 
+    public Long getUtime() {
+      return utime;
+    }
+
+    public Long getStime() {
+      return stime;
+    }
+
+    public Long getDtime() {
+      return dtime;
+    }
+
+    public Long getRssmemPage() { // get rss # of pages
+      return rssmemPage;
+    }
+
     public int getAge() {
       return age;
     }
     
-    public boolean isParent(ProcessInfo p) {
-      if (pid.equals(p.getPpid())) {
-        return true;
-      }
-      return false;
-    }
-
     public void updateProcessInfo(String name, Integer ppid, Integer pgrpId,
-        Integer sessionId, Long vmem) {
+        Integer sessionId, Long utime, Long stime, Long vmem, Long rssmem) {
       this.name = name;
       this.ppid = ppid;
       this.pgrpId = pgrpId;
       this.sessionId = sessionId;
+      this.utime = utime;
+      this.stime = stime;
       this.vmem = vmem;
+      this.rssmemPage = rssmem;
+    }
+
+    public void updateJiffy(ProcessInfo oldInfo) {
+      this.dtime = (oldInfo == null ? this.utime + this.stime
+              : (this.utime + this.stime) - (oldInfo.utime + oldInfo.stime));
     }
 
     public void updateAge(ProcessInfo oldInfo) {
@@ -534,6 +551,52 @@ public class ProcfsBasedProcessTree {
 
     public List<ProcessInfo> getChildren() {
       return children;
+    }
+
+    public String getCmdLine(String procfsDir) {
+      String ret = "N/A";
+      if (pid == null) {
+        return ret;
+      }
+      BufferedReader in = null;
+      FileReader fReader = null;
+      try {
+        fReader =
+            new FileReader(new File(new File(procfsDir, pid.toString()),
+                PROCFS_CMDLINE_FILE));
+      } catch (FileNotFoundException f) {
+        // The process vanished in the interim!
+        return ret;
+      }
+
+      in = new BufferedReader(fReader);
+
+      try {
+        ret = in.readLine(); // only one line
+        ret = ret.replace('\0', ' '); // Replace each null char with a space
+        if (ret.equals("")) {
+          // The cmdline might be empty because the process is swapped out or is
+          // a zombie.
+          ret = "N/A";
+        }
+      } catch (IOException io) {
+        LOG.warn("Error reading the stream " + io);
+        ret = "N/A";
+      } finally {
+        // Close the streams
+        try {
+          fReader.close();
+          try {
+            in.close();
+          } catch (IOException i) {
+            LOG.warn("Error closing the stream " + in);
+          }
+        } catch (IOException i) {
+          LOG.warn("Error closing the stream " + fReader);
+        }
+      }
+
+      return ret;
     }
   }
 }

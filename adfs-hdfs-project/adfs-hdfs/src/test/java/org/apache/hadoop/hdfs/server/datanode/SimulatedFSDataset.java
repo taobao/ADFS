@@ -32,6 +32,7 @@ import javax.management.StandardMBean;
 import org.apache.hadoop.conf.Configurable;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hdfs.protocol.Block;
+import org.apache.hadoop.hdfs.protocol.BlockLocalPathInfo;
 import org.apache.hadoop.hdfs.protocol.FSConstants;
 import org.apache.hadoop.hdfs.server.datanode.metrics.FSDatasetMBean;
 import org.apache.hadoop.hdfs.server.protocol.BlockRecoveryInfo;
@@ -199,6 +200,10 @@ public class SimulatedFSDataset  implements FSConstants, FSDatasetInterface, Con
       return used;
     }
     
+    int getNumFailedVolumes() {
+      return 0;
+    }
+
     synchronized boolean alloc(long amount) {
       if (getFree() >= amount) {
         used += amount;
@@ -307,6 +312,21 @@ public class SimulatedFSDataset  implements FSConstants, FSDatasetInterface, Con
     }
     return blockTable;
   }
+  
+  @Override
+  public void requestAsyncBlockReport() {
+  }
+
+  @Override
+  public boolean isAsyncBlockReportReady() {
+    return true;
+  }
+
+  @Override
+  public Block[] retrieveAsyncBlockReport() {
+    return getBlockReport();
+  }
+
 
   public long getCapacity() throws IOException {
     return storage.getCapacity();
@@ -318,6 +338,11 @@ public class SimulatedFSDataset  implements FSConstants, FSDatasetInterface, Con
 
   public long getRemaining() throws IOException {
     return storage.getFree();
+  }
+
+  @Override // FSDatasetMBean
+  public int getNumFailedVolumes() {
+    return storage.getNumFailedVolumes();
   }
 
   public synchronized long getLength(Block b) throws IOException {
@@ -684,16 +709,21 @@ public class SimulatedFSDataset  implements FSConstants, FSDatasetInterface, Con
   public boolean hasEnoughResources() {
     return true;
   }
-  
-  @Override
-  public Block[] getBlocksBeingWrittenReport() {
-    return new Block[0];
-  }
 
   @Override
   public BlockRecoveryInfo startBlockRecovery(long blockId)
       throws IOException {
     Block stored = getStoredBlock(blockId);
     return new BlockRecoveryInfo(stored, false);
+  }
+
+  @Override
+  public Block[] getBlocksBeingWrittenReport() {
+    return new Block[0];
+  }
+
+  @Override
+  public BlockLocalPathInfo getBlockLocalPathInfo(Block blk) throws IOException {
+    throw new IOException("getBlockLocalPathInfo not supported.");
   }
 }

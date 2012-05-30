@@ -23,28 +23,28 @@ import java.io.IOException;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
+import java.security.PrivilegedExceptionAction;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Pattern;
-
-import javax.security.auth.login.LoginException;
 
 import org.apache.commons.logging.*;
 
 import org.apache.hadoop.conf.*;
-import org.apache.hadoop.net.NetUtils;
 import org.apache.hadoop.util.*;
 import org.apache.hadoop.fs.permission.FsPermission;
 import org.apache.hadoop.io.MultipleIOException;
+import org.apache.hadoop.security.SecurityUtil;
 import org.apache.hadoop.security.UserGroupInformation;
+import org.apache.hadoop.security.token.Token;
 
 /****************************************************************
  * An abstract base class for a fairly generic filesystem.  It
@@ -91,6 +91,21 @@ public abstract class FileSystem extends Configured implements Closeable {
    */
   private Set<Path> deleteOnExit = new TreeSet<Path>();
 
+  public static FileSystem get(final URI uri, final Configuration conf, 
+      final String user)
+  throws IOException, InterruptedException {
+    UserGroupInformation ugi;
+    if (user == null) {
+      ugi = UserGroupInformation.getCurrentUser();
+    } else {
+      ugi = UserGroupInformation.createRemoteUser(user);
+    }
+    return ugi.doAs(new PrivilegedExceptionAction<FileSystem>() {
+      public FileSystem run() throws IOException {
+        return get(uri, conf);
+      }
+    });
+  }
   /** Returns the configured filesystem implementation.*/
   public static FileSystem get(Configuration conf) throws IOException {
     return get(getDefaultUri(conf), conf);
@@ -131,6 +146,22 @@ public abstract class FileSystem extends Configured implements Closeable {
 
   /** Returns a URI whose scheme and authority identify this FileSystem.*/
   public abstract URI getUri();
+  
+  /**
+   * Get the default port for this file system.
+   * @return the default port or 0 if there isn't one
+   */
+  protected int getDefaultPort() {
+    return 0;
+  }
+
+  /**
+   * Get a canonical name for this file system.
+   * @return a URI string that uniquely identifies this file system
+   */
+  public String getCanonicalServiceName() {
+    return SecurityUtil.buildDTServiceName(getUri(), getDefaultPort());
+  }
   
   /** @deprecated call #getUri() instead.*/
   public String getName() { return getUri().toString(); }
@@ -197,6 +228,30 @@ public abstract class FileSystem extends Configured implements Closeable {
     return CACHE.get(uri, conf);
   }
 
+  /**
+   * Returns the FileSystem for this URI's scheme and authority and the 
+   * passed user. Internally invokes {@link #newInstance(URI, Configuration)}
+   * @param uri
+   * @param conf
+   * @param user
+   * @return filesystem instance
+   * @throws IOException
+   * @throws InterruptedException
+   */
+  public static FileSystem newInstance(final URI uri, final Configuration conf,
+      final String user) throws IOException, InterruptedException {
+    UserGroupInformation ugi;
+    if (user == null) {
+      ugi = UserGroupInformation.getCurrentUser();
+    } else {
+      ugi = UserGroupInformation.createRemoteUser(user);
+    }
+    return ugi.doAs(new PrivilegedExceptionAction<FileSystem>() {
+      public FileSystem run() throws IOException {
+        return newInstance(uri,conf); 
+      }
+    });
+  }
   /** Returns the FileSystem for this URI's scheme and authority.  The scheme
    * of the URI determines a configuration property name,
    * <tt>fs.<i>scheme</i>.class</tt> whose value names the FileSystem class.
@@ -238,17 +293,6 @@ public abstract class FileSystem extends Configured implements Closeable {
     return (LocalFileSystem)newInstance(LocalFileSystem.NAME, conf);
   }
 
-  private static class ClientFinalizer extends Thread {
-    public synchronized void run() {
-      try {
-        FileSystem.closeAll();
-      } catch (IOException e) {
-        LOG.info("FileSystem.closeAll() threw an exception:\n" + e);
-      }
-    }
-  }
-  private static final ClientFinalizer clientFinalizer = new ClientFinalizer();
-
   /**
    * Close all cached filesystems. Be sure those filesystems are not
    * used anymore.
@@ -256,7 +300,21 @@ public abstract class FileSystem extends Configured implements Closeable {
    * @throws IOException
    */
   public static void closeAll() throws IOException {
-    CACHE.closeAll();
+    LOG.debug("Starting clear of FileSystem cache with " + CACHE.size() +
+              " elements.");
+    CACHE.closeAll(null, false);
+    LOG.debug("Done clearing cache");
+  }
+
+  /**
+   * Close all cached filesystems for a given UGI. Be sure those filesystems 
+   * are not used anymore.
+   * @param ugi
+   * @throws IOException
+   */
+  public static void closeAllForUGI(UserGroupInformation ugi) 
+  throws IOException {
+    CACHE.closeAll(ugi, false);
   }
 
   /** Make sure that a path specifies a FileSystem. */
@@ -548,6 +606,55 @@ public abstract class FileSystem extends Configured implements Closeable {
       short replication,
       long blockSize,
       Progressable progress) throws IOException;
+
+  /**
+  * Opens an FSDataOutputStream at the indicated Path with write-progress
+  * reporting. Same as create(), except fails if parent directory doesn't
+  * already exist.
+  * @param f the file name to open
+  * @param overwrite if a file with this name already exists, then if true,
+  * the file will be overwritten, and if false an error will be thrown.
+  * @param bufferSize the size of the buffer to be used.
+  * @param replication required block replication for the file.
+  * @param blockSize
+  * @param progress
+  * @throws IOException
+  * @see #setPermission(Path, FsPermission)
+  * @deprecated API only for 0.20-append
+  */
+  @Deprecated
+  public FSDataOutputStream createNonRecursive(Path f,
+      boolean overwrite,
+      int bufferSize, short replication, long blockSize,
+      Progressable progress) throws IOException {
+    return this.createNonRecursive(f, FsPermission.getDefault(),
+        overwrite, bufferSize, replication, blockSize, progress);
+  }
+  
+  /**
+  * Opens an FSDataOutputStream at the indicated Path with write-progress
+  * reporting. Same as create(), except fails if parent directory doesn't
+  * already exist.
+  * @param f the file name to open
+  * @param permission
+  * @param overwrite if a file with this name already exists, then if true,
+  * the file will be overwritten, and if false an error will be thrown.
+  * @param bufferSize the size of the buffer to be used.
+  * @param replication required block replication for the file.
+  * @param blockSize
+  * @param progress
+  * @throws IOException
+  * @see #setPermission(Path, FsPermission)
+  * @deprecated API only for 0.20-append
+  */
+  @Deprecated
+  public FSDataOutputStream createNonRecursive(Path f, FsPermission permission,
+      boolean overwrite,
+      int bufferSize, short replication, long blockSize,
+      Progressable progress) throws IOException {
+    throw new IOException("createNonRecursive unsupported for this filesystem "
+        + this.getClass());
+  }
 
   /**
    * Creates the given Path as a brand-new zero-length file.  If
@@ -1021,9 +1128,6 @@ public abstract class FileSystem extends Configured implements Closeable {
     /** Default pattern character: Character set close. */
     private static final char  PAT_SET_CLOSE = ']';
       
-    GlobFilter() {
-    }
-      
     GlobFilter(String filePattern) throws IOException {
       setRegex(filePattern);
     }
@@ -1140,6 +1244,15 @@ public abstract class FileSystem extends Configured implements Closeable {
       .makeQualified(this);
   }
 
+  /**
+   * Get a new delegation token for this file system.
+   * @param renewer the account name that is allowed to renew the token.
+   * @return a new delegation token
+   * @throws IOException
+   */
+  public Token<?> getDelegationToken(String renewer) throws IOException {
+    return null;
+  }
 
   /**
    * Set the current working directory for the given file system. All relative
@@ -1288,6 +1401,7 @@ public abstract class FileSystem extends Configured implements Closeable {
     // delete all files that were marked as delete-on-exit.
     processDeleteOnExit();
     CACHE.remove(this.key, this);
+    LOG.debug("Removing filesystem for " + getUri());
   }
 
   /** Return the total size of all files in the filesystem.*/
@@ -1441,6 +1555,7 @@ public abstract class FileSystem extends Configured implements Closeable {
   private static FileSystem createFileSystem(URI uri, Configuration conf
       ) throws IOException {
     Class<?> clazz = conf.getClass("fs." + uri.getScheme() + ".impl", null);
+    LOG.debug("Creating filesystem for " + uri);
     if (clazz == null) {
       throw new IOException("No FileSystem for scheme: " + uri.getScheme());
     }
@@ -1459,7 +1574,7 @@ public abstract class FileSystem extends Configured implements Closeable {
     /** A variable that makes all objects in the cache unique */
     private static AtomicLong unique = new AtomicLong(1);
 
-    synchronized FileSystem get(URI uri, Configuration conf) throws IOException{
+    FileSystem get(URI uri, Configuration conf) throws IOException{
       Key key = new Key(uri, conf);
       return getInternal(uri, conf, key);
     }
@@ -1471,9 +1586,23 @@ public abstract class FileSystem extends Configured implements Closeable {
     }
 
     private FileSystem getInternal(URI uri, Configuration conf, Key key) throws IOException{
-      FileSystem fs = map.get(key);
-      if (fs == null) {
-        fs = createFileSystem(uri, conf);
+      FileSystem fs = null;
+      synchronized (this) {
+        fs = map.get(key);
+      }
+      if (fs != null) {
+        return fs;
+      }
+      
+      fs = createFileSystem(uri, conf);
+      synchronized (this) {  // refetch the lock again
+        FileSystem oldfs = map.get(key);
+        if (oldfs != null) { // a file system is created while lock is releasing
+          fs.close(); // close the new file system
+          return oldfs;  // return the old file system
+        }
+
+        // now insert the new file system into the map
         if (map.isEmpty() && !clientFinalizer.isAlive()) {
           Runtime.getRuntime().addShutdownHook(clientFinalizer);
         }
@@ -1483,8 +1612,8 @@ public abstract class FileSystem extends Configured implements Closeable {
         if (conf.getBoolean("fs.automatic.close", true)) {
           toAutoClose.add(key);
         }
+        return fs;
       }
-      return fs;
     }
 
     synchronized void remove(Key key, FileSystem fs) {
@@ -1500,54 +1629,73 @@ public abstract class FileSystem extends Configured implements Closeable {
       }
     }
 
-    synchronized void closeAll() throws IOException {
-      closeAll(false);
+    private class ClientFinalizer extends Thread {
+      public synchronized void run() {
+        try {
+          closeAll(null, true);
+        } catch (IOException e) {
+          LOG.info("FileSystem.Cache.closeAll() threw an exception:\n" + e);
+        }
+      }
     }
 
     /**
-     * Close all FileSystem instances in the Cache.
-     * @param onlyAutomatic only close those that are marked for automatic closing
+     * Close all of the file systems in the cache.
+     * @param ugi Only close filesystems with this UGI - may be null to indicate ignoring UGI
+     * @param onlyAutomatic only close filesystems marked for automatic close
      */
-    synchronized void closeAll(boolean onlyAutomatic) throws IOException {
-      List<IOException> exceptions = new ArrayList<IOException>();
-
-      // Make a copy of the keys in the map since we'll be modifying
-      // the map while iterating over it, which isn't safe.
-      List<Key> keys = new ArrayList<Key>();
-      keys.addAll(map.keySet());
-
-      for (Key key : keys) {
-        final FileSystem fs = map.get(key);
-
+    synchronized void closeAll(UserGroupInformation ugi, boolean onlyAutomatic) throws IOException {
+      List<FileSystem> targetFSList = new ArrayList<FileSystem>();
+      //Make a pass over the list and collect the filesystems to close
+      //we cannot close inline since close() removes the entry from the Map
+      for (Map.Entry<Key, FileSystem> entry : map.entrySet()) {
+        final Key key = entry.getKey();
+        final FileSystem fs = entry.getValue();
+        if (fs == null) continue;
+        if (ugi != null && !ugi.equals(key.ugi)) continue;
         if (onlyAutomatic && !toAutoClose.contains(key)) {
           continue;
         }
-
-        //remove from cache
-        remove(key, fs);
-
-        if (fs != null) {
-          try {
-            fs.close();
-          }
-          catch(IOException ioe) {
-            exceptions.add(ioe);
-          }
+        targetFSList.add(fs);   
+      }
+      List<IOException> exceptions = new ArrayList<IOException>();
+      //now make a pass over the target list and close each
+      for (FileSystem fs : targetFSList) {
+        try {
+          fs.close();
+        }
+        catch(IOException ioe) {
+          exceptions.add(ioe);
         }
       }
-
       if (!exceptions.isEmpty()) {
         throw MultipleIOException.createIOException(exceptions);
       }
     }
 
-    private class ClientFinalizer extends Thread {
-      public synchronized void run() {
-        try {
-          closeAll(true);
-        } catch (IOException e) {
-          LOG.info("FileSystem.Cache.closeAll() threw an exception:\n" + e);
+    synchronized void closeAll(UserGroupInformation ugi) throws IOException {
+      List<FileSystem> targetFSList = new ArrayList<FileSystem>();
+      //Make a pass over the list and collect the filesystems to close
+      //we cannot close inline since close() removes the entry from the Map
+      for (Map.Entry<Key, FileSystem> entry : map.entrySet()) {
+        final Key key = entry.getKey();
+        final FileSystem fs = entry.getValue();
+        if (ugi.equals(key.ugi) && fs != null) {
+          targetFSList.add(fs);   
         }
+      }
+      List<IOException> exceptions = new ArrayList<IOException>();
+      //now make a pass over the target list and close each
+      for (FileSystem fs : targetFSList) {
+        try {
+          fs.close();
+        }
+        catch(IOException ioe) {
+          exceptions.add(ioe);
+        }
+      }
+      if (!exceptions.isEmpty()) {
+        throw MultipleIOException.createIOException(exceptions);
       }
     }
 
@@ -1555,8 +1703,8 @@ public abstract class FileSystem extends Configured implements Closeable {
     static class Key {
       final String scheme;
       final String authority;
-      final String username;
-      final long unique;   // an artificial way to make a key unique
+      final long unique;
+      final UserGroupInformation ugi;
 
       Key(URI uri, Configuration conf) throws IOException {
         this(uri, conf, 0);
@@ -1566,20 +1714,12 @@ public abstract class FileSystem extends Configured implements Closeable {
         scheme = uri.getScheme()==null?"":uri.getScheme().toLowerCase();
         authority = uri.getAuthority()==null?"":uri.getAuthority().toLowerCase();
         this.unique = unique;
-        UserGroupInformation ugi = UserGroupInformation.readFrom(conf);
-        if (ugi == null) {
-          try {
-            ugi = UserGroupInformation.login(conf);
-          } catch(LoginException e) {
-            LOG.warn("uri=" + uri, e);
-          }
-        }
-        username = ugi == null? null: ugi.getUserName();
+        this.ugi = UserGroupInformation.getCurrentUser();
       }
 
       /** {@inheritDoc} */
       public int hashCode() {
-        return (scheme + authority + username).hashCode() + (int)unique;
+        return (scheme + authority).hashCode() + (int)unique + ugi.hashCode();
       }
 
       static boolean isEqual(Object a, Object b) {
@@ -1595,7 +1735,7 @@ public abstract class FileSystem extends Configured implements Closeable {
           Key that = (Key)obj;
           return isEqual(this.scheme, that.scheme)
                  && isEqual(this.authority, that.authority)
-                 && isEqual(this.username, that.username)
+                 && isEqual(this.ugi, that.ugi)
                  && (this.unique == that.unique);
         }
         return false;        
@@ -1603,8 +1743,16 @@ public abstract class FileSystem extends Configured implements Closeable {
 
       /** {@inheritDoc} */
       public String toString() {
-        return username + "@" + scheme + "://" + authority;        
+        return "("+ugi.toString() + ")@" + scheme + "://" + authority;        
       }
+    }
+    
+    /**
+     * Get the number of file systems in the cache.
+     * @return the number of cached file systems
+     */
+    int size() {
+      return map.size();
     }
   }
   
@@ -1612,6 +1760,9 @@ public abstract class FileSystem extends Configured implements Closeable {
     private final String scheme;
     private AtomicLong bytesRead = new AtomicLong();
     private AtomicLong bytesWritten = new AtomicLong();
+    private AtomicInteger readOps = new AtomicInteger();
+    private AtomicInteger largeReadOps = new AtomicInteger();
+    private AtomicInteger writeOps = new AtomicInteger();
     
     public Statistics(String scheme) {
       this.scheme = scheme;
@@ -1634,6 +1785,30 @@ public abstract class FileSystem extends Configured implements Closeable {
     }
     
     /**
+     * Increment the number of read operations
+     * @param count number of read operations
+     */
+    public void incrementReadOps(int count) {
+      readOps.getAndAdd(count);
+    }
+
+    /**
+     * Increment the number of large read operations
+     * @param count number of large read operations
+     */
+    public void incrementLargeReadOps(int count) {
+      largeReadOps.getAndAdd(count);
+    }
+
+    /**
+     * Increment the number of write operations
+     * @param count number of write operations
+     */
+    public void incrementWriteOps(int count) {
+      writeOps.getAndAdd(count);
+    }
+
+    /**
      * Get the total number of bytes read
      * @return the number of bytes
      */
@@ -1649,9 +1824,36 @@ public abstract class FileSystem extends Configured implements Closeable {
       return bytesWritten.get();
     }
     
+    /**
+     * Get the number of file system read operations such as list files
+     * @return number of read operations
+     */
+    public int getReadOps() {
+      return readOps.get() + largeReadOps.get();
+    }
+
+    /**
+     * Get the number of large file system read operations such as list files
+     * under a large directory
+     * @return number of large read operations
+     */
+    public int getLargeReadOps() {
+      return largeReadOps.get();
+    }
+
+    /**
+     * Get the number of file system write operations such as create, append 
+     * rename etc.
+     * @return number of write operations
+     */
+    public int getWriteOps() {
+      return writeOps.get();
+    }
+
     public String toString() {
-      return bytesRead + " bytes read and " + bytesWritten + 
-             " bytes written";
+      return bytesRead + " bytes read, " + bytesWritten + " bytes written, "
+          + readOps + " read ops, " + largeReadOps + " large read ops, "
+          + writeOps + " write ops";
     }
     
     /**
