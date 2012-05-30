@@ -77,3 +77,4 @@ Create binary distribution without native code and without documentation:
   $ mvn package -Pdist -DskipTests -Dtar
 
 ----------------------------------------------------------------------------------
+
