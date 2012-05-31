@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -106,7 +107,7 @@ public class DistributedOperationQueue {
    * lock operation-buckets by operations
    */
   void lockBuckets(DistributedOperation... operations) {
-    Set<OperandKey> keySet = new HashSet<OperandKey>();
+    Set<OperandKey> keySet = new LinkedHashSet<OperandKey>();
     for (DistributedOperation operation : operations) {
       keySet.add(operation.getKey());
     }

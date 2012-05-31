@@ -185,7 +185,7 @@ public class DistributedClient implements Closeable, InvocationHandler {
   }
 
   @Override
-  public synchronized void close() {
+  public void close() {
     Utilities.logDebug(logger, "start to close client");
     if (distributedLeaseThread != null) distributedLeaseThread.close();
     if (masterServer != null && masterServer.proxy != null) RPC.stopProxy(masterServer.proxy);
