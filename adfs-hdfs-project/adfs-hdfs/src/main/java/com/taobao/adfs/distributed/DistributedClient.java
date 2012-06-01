@@ -209,6 +209,8 @@ public class DistributedClient implements Closeable, InvocationHandler {
     int retrySleepTime = conf.getInt("distributed.client.retry.sleep", 10000);
     for (int i = 0; i < retryNumber; ++i) {
       try {
+        if (distributedLeaseThread.shouldClose.get())
+          throw new IOException(getClass().getSimpleName() + " has been closed");
         long startTime = System.currentTimeMillis();
         if (masterServer == null) throw new IOException("no master to do call " + invocation);
         if (masterServer.proxy == null) throw new IOException("no proxy to " + masterServer.name);
@@ -274,6 +276,7 @@ public class DistributedClient implements Closeable, InvocationHandler {
         masterServer.proxy = null;
         RPC.stopProxy(oldProxy);
         Utilities.logInfo(logger, "stop proxy to ", masterServer.name);
+        if (newMasterServer == null) return masterServer = null;
       }
     }
     if (masterServer == null || masterServer.name == null || !masterServer.name.equals(newMasterServer.name)

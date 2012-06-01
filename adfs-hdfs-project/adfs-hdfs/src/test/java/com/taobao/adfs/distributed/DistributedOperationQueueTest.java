@@ -12,6 +12,7 @@ import com.taobao.adfs.distributed.example.ExampleData;
 
 public class DistributedOperationQueueTest {
   DistributedOperationQueue queue = new DistributedOperationQueue();
+  static Random r = new Random();
 
   @Test
   public void testPutAndGetWithOneThread() {
@@ -32,7 +33,7 @@ public class DistributedOperationQueueTest {
 
   @Test
   public void testPutAndGetWithMultiThread() {
-    for(int i = 0; i < 20; i++ ){
+    for(int i = 0; i < 2; i++ ){
       Thread t = new PutAndGetter(queue);
       t.setName("thread"+i);
       t.start();
@@ -136,19 +137,19 @@ public class DistributedOperationQueueTest {
     public void run() {
       DistributedOperation op;
       DistributedOperation[] opList;
-      for (int i = 0; i < 10000; i++) {
+      for (int i = 0; i < 10000000; i++) {
         op = generateOpration();
         queue.add(op);
-        if ((i + 1) % 100 == 0) {
-          System.out.println(Thread.currentThread().getName() + "index " + i + "begin delete");
-          try {
-            Thread.sleep(1);
-          } catch (InterruptedException e) {
-            // TODO Auto-generated catch block
-            e.printStackTrace();
-          }
+        if ((i + 1) % 10 == 0) {
+//          System.out.println(Thread.currentThread().getName() + "index " + i + "begin delete");
+//          try {
+//            Thread.sleep(1);
+//          } catch (InterruptedException e) {
+//            // TODO Auto-generated catch block
+//            e.printStackTrace();
+//          }
           opList = queue.lockAndGetOperations(Thread.currentThread().getId());
-          System.out.println("array length:" + opList.length + " " + Arrays.toString(opList));
+//          System.out.println("array length:" + opList.length + " " + Arrays.toString(opList));
           queue.deleteAndUnlockOperations(Thread.currentThread().getId());
         }
       }
@@ -212,14 +213,12 @@ public class DistributedOperationQueueTest {
     }
   }
   public static DistributedOperation generateOpration() {
-    Random r = new Random();
-    ExampleData.OperandExample f = new ExampleData.OperandExample("contend" + r.nextLong());
+    ExampleData.OperandExample f = new ExampleData.OperandExample("content");
     DistributedOperation op =
       new DistributedOperation(DistributedOperation.DistributedOperator.values()[r.nextInt(3)], f);
     return op;
   }
   public static DistributedOperation generateOprationById(long id) {
-    Random r = new Random();
     ExampleData.OperandExample f = new ExampleData.OperandExample("contend" + r.nextLong(),id);
     DistributedOperation op =
       new DistributedOperation(DistributedOperation.DistributedOperator.values()[r.nextInt(3)], f);

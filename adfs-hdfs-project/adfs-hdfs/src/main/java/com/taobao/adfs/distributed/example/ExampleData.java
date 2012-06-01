@@ -175,7 +175,7 @@ public class ExampleData extends DistributedData implements ExampleProtocol {
 
     public OperandExample(String content) {
       this.content = content;
-      id = new Random().nextLong();
+      id = content.hashCode();
     }
 
     public OperandExample(String content, long id) {
