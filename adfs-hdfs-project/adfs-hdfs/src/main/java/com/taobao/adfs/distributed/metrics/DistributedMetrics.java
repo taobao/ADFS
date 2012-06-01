@@ -18,7 +18,6 @@
 
 package com.taobao.adfs.distributed.metrics;
 
-import java.io.IOException;
 import java.lang.reflect.Constructor;
 import java.util.HashMap;
 import java.util.Map;
@@ -28,8 +27,8 @@ import javax.management.ObjectName;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.metrics.MetricsContext;
 import org.apache.hadoop.metrics.MetricsRecord;
+import org.apache.hadoop.metrics.MetricsUtil;
 import org.apache.hadoop.metrics.Updater;
-import org.apache.hadoop.metrics.ganglia.GangliaContext31;
 import org.apache.hadoop.metrics.util.MBeanUtil;
 import org.apache.hadoop.metrics.util.MetricsBase;
 import org.apache.hadoop.metrics.util.MetricsDynamicMBeanBase;
@@ -50,7 +49,6 @@ public class DistributedMetrics implements Updater {
   public static final Logger logger = LoggerFactory.getLogger(DistributedMetrics.class);
   MetricsRecord metricsRecord;
   MetricsRegistry registry = new MetricsRegistry();
-  DistributedActivtyMBean distributedActivtyMBean;
   public static final String metricsConfKeyPrefix = "distributed.metrics.conf.";
   static Configuration conf = new Configuration(false);
 
@@ -63,38 +61,11 @@ public class DistributedMetrics implements Updater {
   public void open(String recordName) {
     String sessionId = conf.get("session.id");
 
-    // Initiate Java VM metrics
-    JvmMetrics.init("distributed", sessionId, recordName + ".jvm");
-    distributedActivtyMBean = new DistributedActivtyMBean(registry);
-
     // Create a record for distributed metrics
     MetricsContext metricsContext = MetricsUtil.getContext("distributed");
     metricsRecord = MetricsUtil.createRecord(metricsContext, recordName);
     metricsRecord.setTag("sessionId", sessionId);
     metricsContext.registerUpdater(this);
-  }
-
-  static public Map<String, String> getMetricsConfMap() throws IOException {
-    if (conf == null) return null;
-    String[] contextNames = new String[] { "distributed" };
-    String clazz = Utilities.setConfDefaultValue(conf, "distributed.metrics.class", GangliaContext31.class.getName());
-    String period = Utilities.setConfDefaultValue(conf, "distributed.metrics.period", 10);
-    String address = Utilities.setConfDefaultValue(conf, "distributed.metrics.address", "127.0.0.1:8649");
-    for (String contextName : contextNames) {
-      String classKeyOfCurrentContext = metricsConfKeyPrefix + contextName + ".class";
-      String periodKeyOfCurrentContext = metricsConfKeyPrefix + contextName + ".period";
-      String addressKeyOfCurrentContext = metricsConfKeyPrefix + contextName + ".servers";
-
-      Utilities.setConfDefaultValue(conf, classKeyOfCurrentContext, clazz);
-      Utilities.setConfDefaultValue(conf, periodKeyOfCurrentContext, period);
-      Utilities.setConfDefaultValue(conf, addressKeyOfCurrentContext, address);
-
-      Utilities.logTrace(logger, "set ", classKeyOfCurrentContext, "=", conf.get(classKeyOfCurrentContext));
-      Utilities.logTrace(logger, "set ", periodKeyOfCurrentContext, "=", conf.get(periodKeyOfCurrentContext));
-      Utilities.logTrace(logger, "set ", addressKeyOfCurrentContext, "=", conf.get(addressKeyOfCurrentContext));
-    }
-
-    return Utilities.getConf(conf, metricsConfKeyPrefix);
   }
 
   private MetricsBase getMetrics(Class<? extends MetricsBase> metricClass, String name, String description) {
@@ -162,7 +133,6 @@ public class DistributedMetrics implements Updater {
   }
 
   public void shutdown() {
-    if (distributedActivtyMBean != null) distributedActivtyMBean.shutdown();
   }
 
   /**

@@ -59,20 +59,15 @@ public class DistributedClient implements Closeable, InvocationHandler {
     return (Closeable) new DistributedClient(conf).operationProxy;
   }
 
-  static public Closeable getClient(Configuration conf, boolean waitServer) throws IOException {
-    conf.setBoolean("distributed.client.wait.server", waitServer);
-    return getClient(conf);
-  }
-
-  static public void close(Object distributedClient) {
+  static public void close(Object client) {
     try {
-      ((Closeable) distributedClient).close();
+      if (client != null) ((Closeable) client).close();
     } catch (Throwable t) {
       Utilities.logWarn(logger, "fail to close client", t);
     }
   }
 
-  static public DistributedClient getClient(Object proxy) {
+  static DistributedClient getDistributedClientFromProxy(Object proxy) {
     try {
       return (DistributedClient) Utilities.getFieldValue(proxy, "h");
     } catch (Throwable t) {
@@ -82,7 +77,7 @@ public class DistributedClient implements Closeable, InvocationHandler {
   }
 
   static public InetSocketAddress getMasterAddress(Object proxy) {
-    DistributedClient client = getClient(proxy);
+    DistributedClient client = getDistributedClientFromProxy(proxy);
     if (client == null) return null;
     else return client.getMasterAddress();
   }
@@ -93,14 +88,20 @@ public class DistributedClient implements Closeable, InvocationHandler {
   }
 
   private void initialize() throws IOException {
-    Utilities.setLoggerLevel(conf, logger);
+    configLogger(conf);
     waitMaster();
-    createClientProxy();
-    updateServers();
-    followConfSettings();
-    followLoggerLevels();
     createMetrics();
     distributedLeaseThread = createLeaseThread();
+  }
+
+  public void configLogger(Configuration conf) throws IOException {
+    String loggerLevels = conf.get("distributed.logger.levels", "");
+    if (!loggerLevels.contains("org.apache.zookeeper.ZooKeeper"))
+      loggerLevels += ",org.apache.zookeeper.ZooKeeper=WARN";
+    if (!loggerLevels.contains("org.apache.zookeeper.ClientCnxn"))
+      loggerLevels += ",org.apache.zookeeper.ClientCnxn=WARN";
+    conf.set("distributed.logger.levels", loggerLevels);
+    Utilities.setLoggerLevel(conf, logger);
   }
 
   void createMetrics() throws IOException {
@@ -230,8 +231,10 @@ public class DistributedClient implements Closeable, InvocationHandler {
         }
         Utilities.logWarn(logger, "fail to request ", masterServer.name, " to do ", invocation, ", retryIndex=", i,
             ", maxRetryIndex=", retryNumber - 1, " exception=", t);
-        if (i < retryNumber - 1) Utilities.sleepAndProcessInterruptedException(retrySleepTime, logger);
-        else throw t;
+        if (i < retryNumber - 1) {
+          Utilities.sleepAndProcessInterruptedException(retrySleepTime, logger);
+          updateServers();
+        } else throw t;
       }
     }
     throw new IOException("never to here");
@@ -248,13 +251,15 @@ public class DistributedClient implements Closeable, InvocationHandler {
   }
 
   synchronized void waitMaster() throws IOException {
-    if (!conf.getBoolean("distributed.client.wait.master", true)) return;
     long startTime = System.currentTimeMillis();
     while (true) {
       try {
-        ServerStatus masterServer = getServerManager().getServers(null).getMaster(true);
-        if (masterServer == null) throw new IOException("master server is null@" + getServerManager().getAddress());
-        if (isProxyValid(masterServer.proxy)) throw new IOException("master server proxy is invalid");
+        ServerStatus masterServer = updateServers();
+        if (masterServer == null || masterServer.proxy == null)
+          throw new IOException("master server is null: " + masterServer);
+        createClientProxy();
+        followConfSettings();
+        followLoggerLevels();
         return;
       } catch (Throwable t) {
         long elapsedTime = System.currentTimeMillis() - startTime;
@@ -275,7 +280,7 @@ public class DistributedClient implements Closeable, InvocationHandler {
         DistributedInvocable oldProxy = masterServer.proxy;
         masterServer.proxy = null;
         RPC.stopProxy(oldProxy);
-        Utilities.logInfo(logger, "stop proxy to ", masterServer.name);
+        Utilities.logDebug(logger, "stop proxy to ", masterServer.name);
         if (newMasterServer == null) return masterServer = null;
       }
     }
@@ -284,12 +289,12 @@ public class DistributedClient implements Closeable, InvocationHandler {
       if (masterServer != null && masterServer.proxy != null) {
         RPC.stopProxy(masterServer.proxy);
         masterServer.proxy = null;
-        Utilities.logInfo(logger, "stop proxy to ", masterServer.name);
+        Utilities.logDebug(logger, "stop proxy to ", masterServer.name);
         if (masterServer.name.equals(newMasterServer.name)) return masterServer;
       }
       newMasterServer.proxy = createServerProxy(newMasterServer.name);
       masterServer = newMasterServer;
-      Utilities.logInfo(logger, "create proxy to ", masterServer.name);
+      Utilities.logDebug(logger, "create proxy to ", masterServer.name);
     }
     return masterServer;
   }

@@ -42,7 +42,6 @@ import com.taobao.adfs.distributed.DistributedManager.ServerStatuses;
 import com.taobao.adfs.distributed.DistributedServer.ServerStatus;
 import com.taobao.adfs.distributed.DistributedServer.ServerType;
 import com.taobao.adfs.distributed.metrics.DistributedMetrics;
-import com.taobao.adfs.distributed.metrics.JvmMetrics;
 import com.taobao.adfs.distributed.rpc.ClassCache;
 import com.taobao.adfs.distributed.rpc.RPC.Invocation;
 import com.taobao.adfs.util.Utilities;
@@ -83,10 +82,8 @@ public class DistributedShell {
     Utilities.setLoggerLevel(Utilities.class.getName(), Level.WARN.toString(), null);
     Utilities.setLoggerLevel(DistributedClient.class.getName(), Level.WARN.toString(), null);
     Utilities.setLoggerLevel(DistributedMetrics.class.getName(), Level.WARN.toString(), null);
-    Utilities.setLoggerLevel(JvmMetrics.class.getName(), Level.WARN.toString(), null);
     Utilities.setConfDefaultValue(conf, "distributed.logger.follow.excludes", Utilities.class.getName() + ","
-        + DistributedClient.class.getName() + "," + DistributedMetrics.class.getName() + ","
-        + JvmMetrics.class.getName());
+        + DistributedClient.class.getName() + "," + DistributedMetrics.class.getName());
     Utilities.setLoggerLevel(conf, null);
   }
 

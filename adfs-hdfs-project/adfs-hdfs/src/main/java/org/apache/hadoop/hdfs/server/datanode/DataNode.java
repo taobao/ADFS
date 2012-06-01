@@ -375,7 +375,7 @@ public class DataNode extends Configured
     this.dnRegistration = new DatanodeRegistration(machineName + ":" + tmpPort);
 
     // connect to name node
-    this.namenode = (DatanodeProtocol) DistributedClient.getClient(conf, true);
+    this.namenode = (DatanodeProtocol) DistributedClient.getClient(conf);
     // get version and id info from the name-node
     NamespaceInfo nsInfo = handshake();
     StartupOption startOpt = getStartupOption(conf);

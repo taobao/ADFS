@@ -297,7 +297,7 @@ public class Utilities {
     Level newLevel = (level == null || level.equals("null")) ? null : Level.toLevel(level);
     Level oldLevel = LogManager.getLogger(loggerName).getLevel();
     if ((newLevel == null && oldLevel == null) || (newLevel != null && newLevel.equals(oldLevel))) return level;
-    log(logger, Level.INFO, "set logger level: ", loggerName, "=", newLevel);
+    log(logger, Level.DEBUG, "set logger level: ", loggerName, "=", newLevel);
     LogManager.getLogger(loggerName).setLevel(newLevel);
     return level;
   }
