@@ -157,7 +157,7 @@ public class BlockEntry implements Comparable<BlockEntry> {
   public static long getTotalLength(List<BlockEntry> blockEntryList) {
     long totalLength = 0;
     for (BlockEntry blockEntry : blockEntryList) {
-      totalLength += blockEntry.getLength();
+      if (blockEntry.getLength() > 0) totalLength += blockEntry.getLength();
     }
     return totalLength;
   }

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -46,6 +46,7 @@ import org.apache.hadoop.hdfs.server.namenode.FSNamesystem;
 import org.apache.hadoop.hdfs.server.namenode.LeaseManager;
 import org.apache.hadoop.io.IOUtils;
 import org.apache.log4j.Level;
+import org.apache.zookeeper.server.quorum.QuorumPeerConfig.ConfigException;
 
 
 /**
@@ -172,6 +173,8 @@ public class TestFileCreation extends junit.framework.TestCase {
 
   /**
    * Test that file data becomes available before file is closed.
+ * @throws InterruptedException 
+ * @throws ConfigException 
    */
   public void testFileCreation() throws IOException {
     Configuration conf = new Configuration();
@@ -219,20 +222,13 @@ public class TestFileCreation extends junit.framework.TestCase {
 
       // write to file
       writeFile(stm);
+      stm.close();
 
       // Make sure a client can read it before it is closed.
       checkFile(fs, file1, 1);
 
-      // verify that file size has changed
-      long len = fs.getFileStatus(file1).getLen();
-      assertTrue(file1 + " should be of size " + (numBlocks * blockSize) +
-                 " but found to be of size " + len, 
-                  len == numBlocks * blockSize);
-
-      stm.close();
-
       // verify that file size has changed to the full size
-      len = fs.getFileStatus(file1).getLen();
+      long len = fs.getFileStatus(file1).getLen();
       assertTrue(file1 + " should be of size " + fileSize +
                  " but found to be of size " + len, 
                   len == fileSize);
@@ -246,14 +242,17 @@ public class TestFileCreation extends junit.framework.TestCase {
         assertEquals(SimulatedFSDataset.DEFAULT_CAPACITY-fileSize, dn.getFSDataset().getRemaining());
       }
     } finally {
+      fs.close();
       cluster.shutdown();
     }
   }
 
   /**
    * Test deleteOnExit
+ * @throws InterruptedException 
+ * @throws ConfigException 
    */
-  public void testDeleteOnExit() throws IOException {
+  public void testDeleteOnExit() throws IOException, ConfigException, InterruptedException {
     Configuration conf = new Configuration();
     if (simulatedStorage) {
       conf.setBoolean(SimulatedFSDataset.CONFIG_PROPERTY_SIMULATED, true);
@@ -274,7 +273,7 @@ public class TestFileCreation extends junit.framework.TestCase {
       FSDataOutputStream stm3 = createFile(localfs, file3, 1);
       System.out.println("DeleteOnExit: Created files.");
 
-      // write to files and close. Purposely, do not close file2.
+      // write to files and close. Purposely, do not write file2.
       writeFile(stm1);
       writeFile(stm3);
       stm1.close();
@@ -314,6 +313,8 @@ public class TestFileCreation extends junit.framework.TestCase {
 
   /**
    * Test file creation using createNonRecursive().
+ * @throws InterruptedException 
+ * @throws ConfigException 
    */
   public void testFileCreationNonRecursive() throws IOException {
     Configuration conf = new Configuration();
@@ -344,7 +345,7 @@ public class TestFileCreation extends junit.framework.TestCase {
       assertTrue("Create a file when parent directory exists as a file"
           + " should throw FileAlreadyExistsException ",
           expectedException != null
-              && expectedException instanceof FileAlreadyExistsException);
+              && expectedException.getMessage().contains("FileAlreadyExistsException"));
       fs.delete(path, true);
       // Create a file in a non-exist directory, should fail
       final Path path2 = new Path(nonExistDir + "/testCreateNonRecursive");
@@ -357,7 +358,7 @@ public class TestFileCreation extends junit.framework.TestCase {
       assertTrue("Create a file in a non-exist dir using"
           + " createNonRecursive() should throw FileNotFoundException ",
           expectedException != null
-              && expectedException instanceof FileNotFoundException);
+              && expectedException.getMessage().contains("FileNotFoundException") );
 
       // Overwrite a file in root dir, should succeed
       out = createNonRecursive(fs, path, 1, true);
@@ -372,7 +373,7 @@ public class TestFileCreation extends junit.framework.TestCase {
       assertTrue("Overwrite a file when parent directory exists as a file"
           + " should throw FileAlreadyExistsException ",
           expectedException != null
-              && expectedException instanceof FileAlreadyExistsException);
+              && expectedException.getMessage().contains("FileAlreadyExistsException") );
       fs.delete(path, true);
       // Overwrite a file in a non-exist directory, should fail
       final Path path3 = new Path(nonExistDir + "/testOverwriteNonRecursive");
@@ -385,7 +386,7 @@ public class TestFileCreation extends junit.framework.TestCase {
       assertTrue("Overwrite a file in a non-exist dir using"
           + " createNonRecursive() should throw FileNotFoundException ",
           expectedException != null
-              && expectedException instanceof FileNotFoundException);
+              && expectedException.getMessage().contains("FileNotFoundException") );
     } finally {
       fs.close();
       cluster.shutdown();
@@ -470,8 +471,8 @@ public class TestFileCreation extends junit.framework.TestCase {
       assertTrue("Error blocks were not cleaned up",
                  locations.locatedBlockCount() == 0);
     } finally {
-      cluster.shutdown();
       client.close();
+      cluster.shutdown();
     }
   }
 

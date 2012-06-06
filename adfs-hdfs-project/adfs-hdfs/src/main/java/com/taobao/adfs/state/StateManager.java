@@ -62,7 +62,14 @@ public class StateManager {
   BlockRepository blockRepository = null;
   DatanodeRepository datanodeRepository = null;
   LeaseRepository leaseRepository = null;
+  private static long softLimit = FSConstants.LEASE_SOFTLIMIT_PERIOD;
+  private static long hardLimit = FSConstants.LEASE_HARDLIMIT_PERIOD;
 
+  public void setLeasePeriod(long softLimit, long hardLimit) {
+    this.softLimit = softLimit;
+    this.hardLimit = hardLimit; 
+  }
+  
   public StateManager(FileRepository fileRepository, BlockRepository blockRepository,
       DatanodeRepository datanodeRepository, LeaseRepository leaseRepository) {
     this.fileRepository = fileRepository;
@@ -819,8 +826,8 @@ public class StateManager {
   }
 
   /** @return true if the Soft Limit Timer has expired */
-  static public boolean expiredSoftLimit(long leaseTime) {
-    return System.currentTimeMillis() - leaseTime > FSConstants.LEASE_SOFTLIMIT_PERIOD;
+  public static boolean expiredSoftLimit(long leaseTime) {
+    return System.currentTimeMillis() - leaseTime > softLimit;
   }
 
   static public class LeaseMonitor implements Runnable {
@@ -828,7 +835,7 @@ public class StateManager {
 
     public void run() {
       try {
-        long expiredHardLimitTime = System.currentTimeMillis() - FSConstants.LEASE_HARDLIMIT_PERIOD;
+        long expiredHardLimitTime = System.currentTimeMillis() - hardLimit;
         List<Lease> leaseList = FSNamesystem.getFSStateManager().findLeaseByTimeLessThan(expiredHardLimitTime);
         for (Lease lease : leaseList) {
           List<File> fileList = FSNamesystem.getFSStateManager().findFileByLeaseHolder(lease.holder);

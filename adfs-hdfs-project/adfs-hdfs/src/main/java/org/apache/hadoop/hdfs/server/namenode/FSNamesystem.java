@@ -37,11 +37,16 @@ import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.Random;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.Map.Entry;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import javax.management.NotCompliantMBeanException;
 import javax.management.ObjectName;
@@ -62,12 +67,12 @@ import org.apache.hadoop.hdfs.protocol.BlockListAsLongs;
 import org.apache.hadoop.hdfs.protocol.ClientProtocol;
 import org.apache.hadoop.hdfs.protocol.DatanodeID;
 import org.apache.hadoop.hdfs.protocol.DatanodeInfo;
-import org.apache.hadoop.hdfs.protocol.DatanodeInfo.AdminStates;
 import org.apache.hadoop.hdfs.protocol.DirectoryListing;
 import org.apache.hadoop.hdfs.protocol.FSConstants;
 import org.apache.hadoop.hdfs.protocol.HdfsFileStatus;
 import org.apache.hadoop.hdfs.protocol.LocatedBlock;
 import org.apache.hadoop.hdfs.protocol.LocatedBlocks;
+import org.apache.hadoop.hdfs.protocol.DatanodeInfo.AdminStates;
 import org.apache.hadoop.hdfs.security.token.block.BlockTokenSecretManager;
 import org.apache.hadoop.hdfs.security.token.block.ExportedBlockKeys;
 import org.apache.hadoop.hdfs.security.token.delegation.DelegationTokenIdentifier;
@@ -79,12 +84,12 @@ import org.apache.hadoop.hdfs.server.namenode.UnderReplicatedBlocks.BlockIterato
 import org.apache.hadoop.hdfs.server.namenode.metrics.FSNamesystemMBean;
 import org.apache.hadoop.hdfs.server.namenode.metrics.FSNamesystemMetrics;
 import org.apache.hadoop.hdfs.server.protocol.BlocksWithLocations;
-import org.apache.hadoop.hdfs.server.protocol.BlocksWithLocations.BlockWithLocations;
 import org.apache.hadoop.hdfs.server.protocol.DatanodeCommand;
 import org.apache.hadoop.hdfs.server.protocol.DatanodeRegistration;
 import org.apache.hadoop.hdfs.server.protocol.DisallowedDatanodeException;
 import org.apache.hadoop.hdfs.server.protocol.NamespaceInfo;
 import org.apache.hadoop.hdfs.server.protocol.UpgradeCommand;
+import org.apache.hadoop.hdfs.server.protocol.BlocksWithLocations.BlockWithLocations;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.ipc.Server;
 import org.apache.hadoop.metrics.util.MBeanUtil;
@@ -96,8 +101,8 @@ import org.apache.hadoop.net.ScriptBasedMapping;
 import org.apache.hadoop.security.AccessControlException;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.security.UserGroupInformation.AuthenticationMethod;
-import org.apache.hadoop.security.token.SecretManager.InvalidToken;
 import org.apache.hadoop.security.token.Token;
+import org.apache.hadoop.security.token.SecretManager.InvalidToken;
 import org.apache.hadoop.security.token.delegation.DelegationKey;
 import org.apache.hadoop.util.Daemon;
 import org.apache.hadoop.util.HostsFileReader;
@@ -105,6 +110,8 @@ import org.apache.hadoop.util.ReflectionUtils;
 import org.apache.hadoop.util.StringUtils;
 import org.apache.hadoop.util.VersionInfo;
 import org.mortbay.util.ajax.JSON;
+
+import com.taobao.adfs.util.HashedBytes;
 
 import com.taobao.adfs.block.BlockEntry;
 import com.taobao.adfs.datanode.Datanode;
@@ -201,6 +208,26 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
   PendingReplicationBlocks pendingReplications;
 
   Random r = new Random();
+
+  // file lock ////
+  Map<String, Integer> filelocks = new ConcurrentHashMap<String, Integer>();
+
+  private final ConcurrentHashMap<HashedBytes, CountDownLatch> lockedFiles =
+      new ConcurrentHashMap<HashedBytes, CountDownLatch>();
+
+  private final ConcurrentHashMap<Integer, HashedBytes> lockIds = new ConcurrentHashMap<Integer, HashedBytes>();
+
+  private final AtomicInteger lockIdGenerator = new AtomicInteger(1);
+
+  int rowLockWaitDuration;
+
+  static private Random rand = new Random();
+
+  static final int DEFAULT_ROWLOCK_WAIT_DURATION = 30000;
+  // file lock ////
+
+  private ReentrantReadWriteLock safeModeLock;
+
   //
   // Threaded object that checks to see if we have been
   // getting heartbeats from all clients.
@@ -303,6 +330,7 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
    */
   private void initialize(NameNode nn, Configuration conf) throws IOException {
     this.systemStart = now();
+    this.safeModeLock = new ReentrantReadWriteLock();
     setConfigurationParameters(conf);
 
     this.nameNodeAddress = nn.getNameNodeAddress();
@@ -385,7 +413,7 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
       this.accessKeyUpdateInterval =
           conf.getLong(DFSConfigKeys.DFS_BLOCK_ACCESS_KEY_UPDATE_INTERVAL_KEY, 600) * 60 * 1000L; // 10 hrs
       this.accessTokenLifetime = conf.getLong(DFSConfigKeys.DFS_BLOCK_ACCESS_TOKEN_LIFETIME_KEY, 600) * 60 * 1000L; // 10
-                                                                                                                    // hrs
+      // hrs
     }
     LOG.info("isAccessTokenEnabled=" + isAccessTokenEnabled + " accessKeyUpdateInterval=" + accessKeyUpdateInterval
         / (60 * 1000) + " min(s), accessTokenLifetime=" + accessTokenLifetime / (60 * 1000) + " min(s)");
@@ -455,11 +483,6 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
         curReplicasDelta, expectedReplicasDelta);
   }
 
-  // ///////////////////////////////////////////////////////
-  //
-  // These methods are called by secondary namenodes
-  //
-  // ///////////////////////////////////////////////////////
   /**
    * return a list of blocks & their locations on <code>datanode</code> whose
    * total size is <code>size</code>
@@ -692,9 +715,16 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
     if (isInSafeMode()) { throw new SafeModeException("Cannot set accesstimes  for " + src, safeMode); }
     File file = stateManager.findFileByPath(src);
     if (file == null) throw new FileNotFoundException("File " + src + " does not exist.");
-    file.mtime = mtime;
-    file.atime = atime;
-    stateManager.updateFileByFile(file, File.MTIME | File.ATIME);
+    Integer lockid = getLock(src.getBytes(), true);
+    try {
+      file.mtime = mtime;
+      file.atime = atime;
+      stateManager.updateFileByFile(file, File.MTIME | File.ATIME);
+    } finally {
+      if (lockid != null) {
+        releaseFileLock(lockid);
+      }
+    }
   }
 
   /**
@@ -731,22 +761,29 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
     if (file.replication == replication) return true;
     int oldRepl = file.replication;
     file.replication = (byte) replication;
-    stateManager.updateFileByFile(file, File.REPLICATION);
-    List<BlockEntry> blockEntryList = stateManager.getBlockEntryListOfFile(src);
+    Integer lockid = getLock(src.getBytes(), true);
+    try {
+      stateManager.updateFileByFile(file, File.REPLICATION);
+      List<BlockEntry> blockEntryList = stateManager.getBlockEntryListOfFile(src);
 
-    // update needReplication priority queues
-    for (int idx = 0; idx < blockEntryList.size(); idx++)
-      updateNeededReplications(blockEntryList.get(idx).getHdfsBlock(), 0, replication - oldRepl);
-
-    if (oldRepl > replication) {
-      // old replication > the new one; need to remove copies
-      LOG.info("Reducing replication for file " + src + ". New replication is " + replication);
+      // update needReplication priority queues
       for (int idx = 0; idx < blockEntryList.size(); idx++)
-        processOverReplicatedBlock(blockEntryList.get(idx).getHdfsBlock(), replication, null, null);
-    } else { // replication factor is increased
-      LOG.info("Increasing replication for file " + src + ". New replication is " + replication);
+        updateNeededReplications(blockEntryList.get(idx).getHdfsBlock(), 0, replication - oldRepl);
+
+      if (oldRepl > replication) {
+        // old replication > the new one; need to remove copies
+        LOG.info("Reducing replication for file " + src + ". New replication is " + replication);
+        for (int idx = 0; idx < blockEntryList.size(); idx++)
+          processOverReplicatedBlock(blockEntryList.get(idx).getHdfsBlock(), replication, null, null);
+      } else { // replication factor is increased
+        LOG.info("Increasing replication for file " + src + ". New replication is " + replication);
+      }
+      return true;
+    } finally {
+      if (lockid != null) {
+        releaseFileLock(lockid);
+      }
     }
-    return true;
   }
 
   long getPreferredBlockSize(String filename) throws IOException {
@@ -813,31 +850,37 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
     if (append && file == null)
       throw new FileNotFoundException(src + ": non-existent file for append on " + clientMachine);
     verifyReplication(src, replication, clientMachine);
-    // TODO: lock this file
 
+    Integer lockid = getLock(src.getBytes(), true);
     try {
-      recoverLeaseInternal(file, holder, clientMachine, false);
-      stateManager.insertLeaseByHolder(holder);
-      if (append) {
-        file.leaseHolder = holder;
-        file = stateManager.updateFileByFile(file, File.LEASEHOLDER);
-      } else {
-        while (true) {
-          file = stateManager.insertFileByPath(src, (int) blockSize, 0, (byte) replication, false, holder);
-          List<com.taobao.adfs.block.Block> blockList = stateManager.findBlockByFileId(file.id);
-          if (blockList.isEmpty()) break;
-          // recreate file with another id, blocks belonging to the old file will be deleted after block report
-          stateManager.deleteFileByFile(file, false);
+      try {
+        recoverLeaseInternal(file, holder, clientMachine, false);
+        stateManager.insertLeaseByHolder(holder);
+        if (append) {
+          file.leaseHolder = holder;
+          file = stateManager.updateFileByFile(file, File.LEASEHOLDER);
+        } else {
+          while (true) {
+            file = stateManager.insertFileByPath(src, (int) blockSize, 0, (byte) replication, false, holder);
+            List<com.taobao.adfs.block.Block> blockList = stateManager.findBlockByFileId(file.id);
+            if (blockList.isEmpty()) break;
+            // recreate file with another id, blocks belonging to the old file will be deleted after block report
+            stateManager.deleteFileByFile(file, false);
+          }
         }
+        if (NameNode.stateChangeLog.isDebugEnabled()) {
+          NameNode.stateChangeLog.debug("DIR* NameSystem.startFile: " + "add " + src + " for " + holder + " from "
+              + clientMachine);
+        }
+        return file;
+      } catch (IOException ie) {
+        NameNode.stateChangeLog.warn("DIR* NameSystem.startFile: " + ie.getMessage());
+        throw ie;
       }
-      if (NameNode.stateChangeLog.isDebugEnabled()) {
-        NameNode.stateChangeLog.debug("DIR* NameSystem.startFile: " + "add " + src + " for " + holder + " from "
-            + clientMachine);
+    } finally {
+      if (lockid != null) {
+        releaseFileLock(lockid);
       }
-      return file;
-    } catch (IOException ie) {
-      NameNode.stateChangeLog.warn("DIR* NameSystem.startFile: " + ie.getMessage());
-      throw ie;
     }
   }
 
@@ -859,10 +902,17 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
     if (isInSafeMode()) { throw new SafeModeException("Cannot recover the lease of " + src, safeMode); }
     if (!DFSUtil.isValidName(src)) { throw new IOException("Invalid file name: " + src); }
     File file = stateManager.findFileByPath(src);
-    if (file == null) throw new FileNotFoundException("File not found " + src);
+    if (file == null) throw new FileNotFoundException("file not found " + src);
     if (!file.isUnderConstruction()) return true;
     if (file.isIdentifierMatched()) return false;
-    recoverLeaseInternal(file, holder, clientMachine, true);
+    Integer lockid = getLock(src.getBytes(), true);
+    try {
+      recoverLeaseInternal(file, holder, clientMachine, true);
+    } finally {
+      if (lockid != null) {
+        releaseFileLock(lockid);
+      }
+    }
     return false;
   }
 
@@ -908,33 +958,40 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
     // Create a LocatedBlock object for the last block of the file to be returned to the client.
     // Return null if the file does not have a partial block at the end.
     LocatedBlock lb = null;
-    BlockEntry lastBlockEntry = stateManager.getLastBlockEntryByFileId(file.id);
-    if (lastBlockEntry != null) {
-      if (file.blockSize > lastBlockEntry.getLength()) {
-        DatanodeDescriptor[] targets =
-            stateManager.getDatanodeDescriptorArrayByBlockList(lastBlockEntry.getBlockList(false));
-        lb = new LocatedBlock(lastBlockEntry.getHdfsBlock(), targets, file.length - lastBlockEntry.getLength());
-        // Remove block from replication queue.
-        updateNeededReplications(lastBlockEntry.getHdfsBlock(), 0, 0);
-        // remove block from the list of pending blocks to be deleted. This reduces possibility of HADOOP-1349.
-        for (Iterator<Collection<Block>> iter = recentInvalidateSets.values().iterator(); iter.hasNext();) {
-          Collection<Block> v = iter.next();
-          if (v.remove(lastBlockEntry.getHdfsBlock())) {
-            pendingDeletionBlocksCount--;
-            if (v.isEmpty()) {
-              iter.remove();
+    Integer lockid = getLock(src.getBytes(), true);
+    try {
+      BlockEntry lastBlockEntry = stateManager.getLastBlockEntryByFileId(file.id);
+      if (lastBlockEntry != null) {
+        if (file.blockSize > lastBlockEntry.getLength()) {
+          DatanodeDescriptor[] targets =
+              stateManager.getDatanodeDescriptorArrayByBlockList(lastBlockEntry.getBlockList(false));
+          lb = new LocatedBlock(lastBlockEntry.getHdfsBlock(), targets, file.length - lastBlockEntry.getLength());
+          // Remove block from replication queue.
+          updateNeededReplications(lastBlockEntry.getHdfsBlock(), 0, 0);
+          // remove block from the list of pending blocks to be deleted. This reduces possibility of HADOOP-1349.
+          for (Iterator<Collection<Block>> iter = recentInvalidateSets.values().iterator(); iter.hasNext();) {
+            Collection<Block> v = iter.next();
+            if (v.remove(lastBlockEntry.getHdfsBlock())) {
+              pendingDeletionBlocksCount--;
+              if (v.isEmpty()) {
+                iter.remove();
+              }
             }
           }
         }
       }
-    }
-    if (lb != null) {
-      if (NameNode.stateChangeLog.isDebugEnabled()) {
-        NameNode.stateChangeLog.debug("DIR* NameSystem.appendFile: file " + src + " for " + holder + " at "
-            + clientMachine + " block " + lb.getBlock() + " block size " + lb.getBlock().getNumBytes());
+      if (lb != null) {
+        if (NameNode.stateChangeLog.isDebugEnabled()) {
+          NameNode.stateChangeLog.debug("DIR* NameSystem.appendFile: file " + src + " for " + holder + " at "
+              + clientMachine + " block " + lb.getBlock() + " block size " + lb.getBlock().getNumBytes());
+        }
+      }
+      return lb;
+    } finally {
+      if (lockid != null) {
+        releaseFileLock(lockid);
       }
     }
-    return lb;
   }
 
   /**
@@ -989,11 +1046,18 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
     // Remove the block from the pending creates list
     NameNode.stateChangeLog.debug("BLOCK* NameSystem.abandonBlock: " + b + "of file " + src);
     if (isInSafeMode()) { throw new SafeModeException("Cannot abandon block " + b + " for fle" + src, safeMode); }
-    File file = stateManager.findFileByPath(src);
-    checkLease(holder, file);
-    stateManager.deleteBlockById(b.getBlockId());
-    NameNode.stateChangeLog.debug("BLOCK* NameSystem.abandonBlock: " + b + " is removed from pendingCreates");
-    return true;
+    Integer lockid = getLock(src.getBytes(), true);
+    try {
+      File file = stateManager.findFileByPath(src);
+      checkLease(holder, file);
+      stateManager.deleteBlockById(b.getBlockId());
+      NameNode.stateChangeLog.debug("BLOCK* NameSystem.abandonBlock: " + b + " is removed from pendingCreates");
+      return true;
+    } finally {
+      if (lockid != null) {
+        releaseFileLock(lockid);
+      }
+    }
   }
 
   // make sure that we still have the lease on this file.
@@ -1028,16 +1092,23 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
     checkLease(holder, file);
 
     List<BlockEntry> blockEntryList = stateManager.getBlockEntryListByFileId(file.id);
-    if (blockEntryList == null || blockEntryList.isEmpty()) {
+    if ((blockEntryList == null || blockEntryList.isEmpty()) && !file.leaseHolder.equals(holder)) {
       NameNode.stateChangeLog.warn("DIR* NameSystem.completeFile: " + "failed to complete " + src
           + " because stateManager.getBlocksByFileId(file.id) is null or empty," + " pending from " + file.leaseHolder);
       return CompleteFileStatus.OPERATION_FAILED;
     }
     if (!checkFileProgress(blockEntryList, true)) return CompleteFileStatus.STILL_WAITING;
 
-    finalizeINodeFileUnderConstruction(file, blockEntryList);
-    NameNode.stateChangeLog.info("DIR* NameSystem.completeFile: file " + src + " is closed by " + holder);
-    return CompleteFileStatus.COMPLETE_SUCCESS;
+    Integer lockid = getLock(src.getBytes(), true);
+    try {
+      finalizeINodeFileUnderConstruction(file, blockEntryList);
+      NameNode.stateChangeLog.info("DIR* NameSystem.completeFile: file " + src + " is closed by " + holder);
+      return CompleteFileStatus.COMPLETE_SUCCESS;
+    } finally {
+      if (lockid != null) {
+        releaseFileLock(lockid);
+      }
+    }
   }
 
   /**
@@ -1156,7 +1227,7 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
    * @param dn
    *          Datanode which holds the corrupt replica
    */
-  public void markBlockAsCorrupt(Block blk, DatanodeInfo dn) throws IOException {
+  public void markBlockAsCorrupt(Block blk, DatanodeInfo dn, Integer lockid) throws IOException {
     DatanodeDescriptor node = dn == null ? null : stateManager.getDatanodeDescriptorByDatanodeId(dn.getId());
     if (node == null) { throw new IOException("Cannot mark block" + blk.getBlockName()
         + " as corrupt because datanode " + dn.getName() + " does not exist. "); }
@@ -1177,17 +1248,35 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
         addToInvalidates(blk, dn, true);
         return;
       }
-      // Add this replica to corruptReplicas Map
-      corruptReplicas.addToCorruptReplicasMap(blk, node);
-      BlockEntry blockEntry = stateManager.getBlockEntryByBlockId(blk.getBlockId());
-      if (countNodes(blockEntry).liveReplicas() > file.replication) {
-        // TODO: adfs : the block is over-replicated so invalidate the replicas immediately
-        invalidateBlock(blk, node);
-      } else {
-        // add the block to neededReplication
-        updateNeededReplications(blk, -1, 0);
+      boolean fileLockedByCurrentThread = true;
+      if (lockid == null) {
+        lockid = getLock(file.path.getBytes(), true);
+        fileLockedByCurrentThread = false;
+      }
+      try {
+        // Add this replica to corruptReplicas Map
+        corruptReplicas.addToCorruptReplicasMap(blk, node);
+        BlockEntry blockEntry = stateManager.getBlockEntryByBlockId(blk.getBlockId());
+        if (countNodes(blockEntry).liveReplicas() > file.replication) {
+          // TODO: adfs : the block is over-replicated so invalidate the replicas immediately
+          invalidateBlock(blk, node);
+        } else {
+          // add the block to neededReplication
+          updateNeededReplications(blk, -1, 0);
+        }
+      } finally {
+        if (lockid != null && !fileLockedByCurrentThread) {
+          releaseFileLock(lockid);
+        }
       }
     }
+  }
+
+  /**
+   * avoid compile error for ut
+   */
+  public void markBlockAsCorrupt(Block blk, DatanodeInfo dn) throws IOException {
+    markBlockAsCorrupt(blk, dn, null);
   }
 
   /**
@@ -1246,17 +1335,24 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
 
     File file = stateManager.findFileByPath(src);
     if (file == null) throw new IOException("not existed path: " + src);
-    if (src.equals(src)) return file;
+    if (src.equals(dst)) return file;
 
-    // create parent directory for dst
-    java.io.File javaFile = new java.io.File(dst);
-    String parentPath = javaFile.getParent();
-    File parentFile = stateManager.insertFileByPath(parentPath, 0, -1, (byte) 0, false, null);
+    Integer lockid = getLock(src.getBytes(), true);
+    try {
+      // create parent directory for dst
+      java.io.File javaFile = new java.io.File(dst);
+      String parentPath = javaFile.getParent();
+      File parentFile = stateManager.insertFileByPath(parentPath, 0, -1, (byte) 0, false, null);
 
-    // change parent directory
-    file.parentId = parentFile.id;
-    file.name = javaFile.getName();
-    return stateManager.updateFileByFile(file, File.PARENTID | File.NAME);
+      // change parent directory
+      file.parentId = parentFile.id;
+      file.name = javaFile.getName();
+      return stateManager.updateFileByFile(file, File.PARENTID | File.NAME);
+    } finally {
+      if (lockid != null) {
+        releaseFileLock(lockid);
+      }
+    }
   }
 
   /**
@@ -1264,9 +1360,7 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
    * is a directory (non empty) and recursive is set to false then throw exception.
    */
   public boolean delete(String src, boolean recursive) throws IOException {
-    List<File> fileList = stateManager.findFileChildrenByPath(src);
-    if ((!recursive) && (fileList != null && !fileList.isEmpty())) { throw new IOException(src + " is non empty"); }
-    boolean status = deleteInternal(src, true);
+    boolean status = deleteInternal(src, recursive, true);
     if (status && auditLog.isInfoEnabled() && isExternalInvocation()) {
       logAuditEvent(UserGroupInformation.getCurrentUser(), Server.getRemoteIp(), "delete", src, null, null);
     }
@@ -1277,13 +1371,20 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
    * Remove the indicated filename from the namespace. This may
    * invalidate some blocks that make up the file.
    */
-  boolean deleteInternal(String src, boolean enforcePermission) throws IOException {
+  boolean deleteInternal(String src, boolean recursive, boolean enforcePermission) throws IOException {
     if (NameNode.stateChangeLog.isDebugEnabled()) {
       NameNode.stateChangeLog.debug("DIR* NameSystem.delete: " + src);
     }
     if (isInSafeMode()) throw new SafeModeException("Cannot delete " + src, safeMode);
     // delete file; block will be deleted for no file is found on next block report
-    return !stateManager.deleteFileByPath(src, false).isEmpty();
+    Integer lockid = getLock(src.getBytes(), true);
+    try {
+      return !stateManager.deleteFileByPath(src, recursive).isEmpty();
+    } finally {
+      if (lockid != null) {
+        releaseFileLock(lockid);
+      }
+    }
   }
 
   void removePathAndBlocks(String src, List<Block> blocks) throws IOException {
@@ -1324,7 +1425,14 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
     if (!DFSUtil.isValidName(src)) { throw new IOException("Invalid directory name: " + src); }
     if (isInSafeMode()) throw new SafeModeException("Cannot create directory " + src, safeMode);
     checkFsObjectLimit();
-    return stateManager.insertFileByPath(src, 0, -1, (byte) 0, false, null);
+    Integer lockid = getLock(src.getBytes(), true);
+    try {
+      return stateManager.insertFileByPath(src, 0, -1, (byte) 0, false, null);
+    } finally {
+      if (lockid != null) {
+        releaseFileLock(lockid);
+      }
+    }
   }
 
   ContentSummary getContentSummary(String src) throws IOException {
@@ -1439,51 +1547,59 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
     if (!file.isUnderConstruction()) { throw new IOException("Unexpected block (=" + lastblock + ") since the file (="
         + file + ") is not under construction"); }
 
-    if (deleteblock) {
-      stateManager.deleteBlockById(lastblock.getBlockId());
-    } else {
-      com.taobao.adfs.block.Block block = new com.taobao.adfs.block.Block();
-      block.id = blockEntry.getBlockId();
-      block.fileId = blockEntry.getFileId();
-      block.fileIndex = blockEntry.getFileIndex();
-      block.length = blockEntry.getLength();
-      block.generationStamp = blockEntry.getGenerationStamp();
-      // insert a flag block
-      if (blockEntry.getBlock(Datanode.NULL_DATANODE_ID) == null) {
-        block.datanodeId = Datanode.NULL_DATANODE_ID;
-        stateManager.insertBlockByBlock(block);
-      }
-      // delete old blocks
-      for (com.taobao.adfs.block.Block oldBlock : blockEntry.getBlockList(false)) {
-        if (oldBlock == null || oldBlock.datanodeId == Datanode.NULL_DATANODE_ID) continue;
-        stateManager.deleteBlockByIdAndDatanodeId(blockEntry.getBlockId(), oldBlock.datanodeId);
-      }
-      // add the block if DatanodeDescriptor valid
-      boolean isNewBlockAdded = false;
-      for (int i = 0; i < newtargets.length; i++) {
-        DatanodeDescriptor node = stateManager.getDatanodeDescriptorByDatanodeId(newtargets[i].getId());
-        if (node != null) {
-          block.datanodeId = node.getId();
+    Integer lockid = getLock(file.path.getBytes(), true);
+    try {
+      if (deleteblock) {
+        stateManager.deleteBlockById(lastblock.getBlockId());
+      } else {
+        com.taobao.adfs.block.Block block = new com.taobao.adfs.block.Block();
+        block.id = blockEntry.getBlockId();
+        block.fileId = blockEntry.getFileId();
+        block.fileIndex = blockEntry.getFileIndex();
+        block.length = blockEntry.getLength();
+        block.generationStamp = blockEntry.getGenerationStamp();
+        // insert a flag block
+        if (blockEntry.getBlock(Datanode.NULL_DATANODE_ID) == null) {
+          block.datanodeId = Datanode.NULL_DATANODE_ID;
           stateManager.insertBlockByBlock(block);
-          isNewBlockAdded = true;
-          LOG.info("commitBlockSynchronization(lastblock=" + lastblock + ", newtargets=" + newtargets + ") successful");
-        } else {
-          LOG.error("commitBlockSynchronization included a target DN " + newtargets[i]
-              + " which is not known to NN. Ignoring.");
+        }
+        // delete old blocks
+        for (com.taobao.adfs.block.Block oldBlock : blockEntry.getBlockList(false)) {
+          if (oldBlock == null || oldBlock.datanodeId == Datanode.NULL_DATANODE_ID) continue;
+          stateManager.deleteBlockByIdAndDatanodeId(blockEntry.getBlockId(), oldBlock.datanodeId);
+        }
+        // add the block if DatanodeDescriptor valid
+        boolean isNewBlockAdded = false;
+        for (int i = 0; i < newtargets.length; i++) {
+          DatanodeDescriptor node = stateManager.getDatanodeDescriptorByDatanodeId(newtargets[i].getId());
+          if (node != null) {
+            block.datanodeId = node.getId();
+            stateManager.insertBlockByBlock(block);
+            isNewBlockAdded = true;
+            LOG.info("commitBlockSynchronization(lastblock=" + lastblock + ", newtargets=" + newtargets
+                + ") successful");
+          } else {
+            LOG.error("commitBlockSynchronization included a target DN " + newtargets[i]
+                + " which is not known to NN. Ignoring.");
+          }
+        }
+        if (isNewBlockAdded) {
+          stateManager.deleteBlockByIdAndDatanodeId(lastblock.getBlockId(), Datanode.NULL_DATANODE_ID);
         }
       }
-      if (isNewBlockAdded) {
-        stateManager.deleteBlockByIdAndDatanodeId(lastblock.getBlockId(), Datanode.NULL_DATANODE_ID);
+
+      // remove lease and close file
+      List<BlockEntry> blockEntryList = stateManager.getBlockEntryListByFileId(file.id);
+      finalizeINodeFileUnderConstruction(file, blockEntryList);
+
+      LOG.info("commitBlockSynchronization(newblock=" + lastblock + ", file=" + file + ", newgenerationstamp="
+          + newgenerationstamp + ", newlength=" + newlength + ", newtargets=" + Arrays.asList(newtargets)
+          + ") successful");
+    } finally {
+      if (lockid != null) {
+        releaseFileLock(lockid);
       }
     }
-
-    // remove lease and close file
-    List<BlockEntry> blockEntryList = stateManager.getBlockEntryListByFileId(file.id);
-    finalizeINodeFileUnderConstruction(file, blockEntryList);
-
-    LOG.info("commitBlockSynchronization(newblock=" + lastblock + ", file=" + file + ", newgenerationstamp="
-        + newgenerationstamp + ", newlength=" + newlength + ", newtargets=" + Arrays.asList(newtargets)
-        + ") successful");
   }
 
   /**
@@ -1504,7 +1620,8 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
    * @return a partial listing starting after startAfter
    */
   public DirectoryListing getListing(String src, byte[] startAfter) throws IOException {
-    return new DirectoryListing(getStateManager().getListing(src), 0);
+    HdfsFileStatus[] fileStatusList = stateManager.getListing(src);
+    return fileStatusList == null ? null : new DirectoryListing(fileStatusList, 0);
   }
 
   // ///////////////////////////////////////////////////////
@@ -2292,7 +2409,6 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
       if (blockEntry.getBlock(Datanode.NULL_DATANODE_ID) != null) {
         stateManager.deleteBlockByIdAndDatanodeId(newBlock.id, Datanode.NULL_DATANODE_ID);
       }
-      incrementSafeBlockCount(blockEntry.getBlockList(true).size() + (oldBlock.length < 0 ? 1 : 0));
     }
   }
 
@@ -2300,7 +2416,7 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
    * The given node is reporting all its blocks. Use this info to
    * update the (machine-->blocklist) and (block-->machinelist) tables.
    */
-  public synchronized void processReport(DatanodeID nodeID, BlockListAsLongs newReport) throws IOException {
+  public void processReport(DatanodeID nodeID, BlockListAsLongs newReport) throws IOException {
     long startTime = now();
     if (newReport == null) newReport = new BlockListAsLongs(new long[0]);
     if (NameNode.stateChangeLog.isDebugEnabled()) {
@@ -2339,40 +2455,47 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
             else toInvalidate.add(new Block(reportedBlock, storedBlock.datanodeId));
           }
         } else {
-          int countOfValidBlock = 0;
-          // add into toRemove if block on other data node is null or dead
-          for (com.taobao.adfs.block.Block storedBlock : storedBlockEntry.getBlockList(false)) {
-            if (storedBlock == null || storedBlock.datanodeId == node.getId()) continue;
-            DatanodeDescriptor otherNode = stateManager.getDatanodeDescriptorByDatanodeId(storedBlock.datanodeId);
-            if (otherNode == null || !otherNode.isAlive) toRemove.add(new Block(storedBlock));
-            else if (storedBlock.length >= 0) ++countOfValidBlock;
-          }
-          // validate the reported block and its replication
-          com.taobao.adfs.block.Block storedBlock = storedBlockEntry.getBlock(node.getId());
-          if (reportedBlock.getGenerationStamp() < storedBlockEntry.getGenerationStamp()) {
-            toInvalidate.add(new Block(reportedBlock, node.getId()));
-            if (storedBlock != null) toRemove.add(new Block(storedBlock));
-          } else if (reportedBlock.getGenerationStamp() > storedBlockEntry.getGenerationStamp()) {
-            // block on name node needs to be updated for smaller generation stamp
-            toAdd.add(new Block(reportedBlock, node.getId()));
-          } else if (reportedBlock.getGenerationStamp() == storedBlockEntry.getGenerationStamp()) {
-            if (reportedBlock.getNumBytes() < storedBlockEntry.getLength()) {
+          Integer lockid = getLock(file.path.getBytes(), true);
+          try {
+            int countOfValidBlock = 0;
+            // add into toRemove if block on other data node is null or dead
+            for (com.taobao.adfs.block.Block storedBlock : storedBlockEntry.getBlockList(false)) {
+              if (storedBlock == null || storedBlock.datanodeId == node.getId()) continue;
+              DatanodeDescriptor otherNode = stateManager.getDatanodeDescriptorByDatanodeId(storedBlock.datanodeId);
+              if (otherNode == null || !otherNode.isAlive) toRemove.add(new Block(storedBlock));
+              else if (storedBlock.length >= 0) ++countOfValidBlock;
+            }
+            // validate the reported block and its replication
+            com.taobao.adfs.block.Block storedBlock = storedBlockEntry.getBlock(node.getId());
+            if (reportedBlock.getGenerationStamp() < storedBlockEntry.getGenerationStamp()) {
               toInvalidate.add(new Block(reportedBlock, node.getId()));
               if (storedBlock != null) toRemove.add(new Block(storedBlock));
-            } else if (reportedBlock.getNumBytes() > storedBlockEntry.getLength()) {
-              // block on name node needs to be updated for smaller length
+            } else if (reportedBlock.getGenerationStamp() > storedBlockEntry.getGenerationStamp()) {
+              // block on name node needs to be updated for smaller generation stamp
               toAdd.add(new Block(reportedBlock, node.getId()));
-            } else if (reportedBlock.getNumBytes() == storedBlockEntry.getLength()) {
-              if (storedBlock == null || storedBlock.generationStamp != reportedBlock.getGenerationStamp()
-                  || storedBlock.length != reportedBlock.getNumBytes()) {
-                // add or update the block on this data node
+            } else if (reportedBlock.getGenerationStamp() == storedBlockEntry.getGenerationStamp()) {
+              if (reportedBlock.getNumBytes() < storedBlockEntry.getLength()) {
+                toInvalidate.add(new Block(reportedBlock, node.getId()));
+                if (storedBlock != null) toRemove.add(new Block(storedBlock));
+              } else if (reportedBlock.getNumBytes() > storedBlockEntry.getLength()) {
+                // block on name node needs to be updated for smaller length
                 toAdd.add(new Block(reportedBlock, node.getId()));
+              } else if (reportedBlock.getNumBytes() == storedBlockEntry.getLength()) {
+                if (storedBlock == null || storedBlock.generationStamp != reportedBlock.getGenerationStamp()
+                    || storedBlock.length != reportedBlock.getNumBytes()) {
+                  // add or update the block on this data node
+                  toAdd.add(new Block(reportedBlock, node.getId()));
+                }
+                // block on name node is same to the block on data node
+                if (++countOfValidBlock != file.replication) {
+                  // insert into toAdd to trigger a replication checking if block is over-replicated
+                  toAdd.add(new Block(reportedBlock, node.getId()));
+                }
               }
-              // block on name node is same to the block on data node
-              if (++countOfValidBlock != file.replication) {
-                // insert into toAdd to trigger a replication checking if block is over-replicated
-                toAdd.add(new Block(reportedBlock, node.getId()));
-              }
+            }
+          } finally {
+            if (lockid != null) {
+              releaseFileLock(lockid);
             }
           }
         }
@@ -2385,17 +2508,29 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
       if (storedBlockEntry != null && !storedBlockEntry.getBlockList(false).isEmpty()) {
         // add into toRemve if block on other data node is null or dead
         File file = stateManager.findFileByBlockId(storedBlockEntry.getFileId());
-        for (com.taobao.adfs.block.Block storedBlock : storedBlockEntry.getBlockList(false)) {
-          if (storedBlock == null) continue;
-          if (file == null) {
-            toRemove.add(new Block(storedBlock));
-          } else {
-            if (storedBlock.datanodeId == node.getId()) {
-              if (!file.isUnderConstruction()) toRemove.add(new Block(storedBlock));
+        Integer lockid = null;
+        if (file != null) {
+          lockid = getLock(file.path.getBytes(), true);
+        }
+        try {
+          for (com.taobao.adfs.block.Block storedBlock : storedBlockEntry.getBlockList(false)) {
+            if (storedBlock == null) continue;
+            if (file == null) {
+              toRemove.add(new Block(storedBlock));
             } else {
-              DatanodeDescriptor otherNode = stateManager.getDatanodeDescriptorByDatanodeId(storedBlock.datanodeId);
-              if (otherNode == null || !otherNode.isAlive) toRemove.add(new Block(storedBlock));
+              if (storedBlock.datanodeId == node.getId()) {
+                if (!file.isUnderConstruction()) toRemove.add(new Block(storedBlock));
+              } else {
+                DatanodeDescriptor otherNode = stateManager.getDatanodeDescriptorByDatanodeId(storedBlock.datanodeId);
+                if (otherNode == null || !otherNode.isAlive) {
+                  toRemove.add(new Block(storedBlock));
+                }
+              }
             }
+          }
+        } finally {
+          if (lockid != null) {
+            releaseFileLock(lockid);
           }
         }
       }
@@ -2440,96 +2575,104 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
     File file = stateManager.findFileById(storedBlockEntry.getFileId());
     if (file == null) return rejectAddStoredBlock(block, node, "Block does not correspond to any file");
 
-    // check block is under construction
-    boolean blockIsUnderConstruction = false;
-    if (file.isUnderConstruction()) {
-      BlockEntry lastBlockEntry = stateManager.getLastBlockEntryByFileId(file.id);
-      blockIsUnderConstruction = lastBlockEntry.getBlockId() == block.getBlockId();
-    }
-    // when block is inserted or length is updated from invalid to valid value
-    boolean blockIsAdded = false;
+    Integer lockid = getLock(file.path.getBytes(), true);
+    try {
+      // check block is under construction
+      boolean blockIsUnderConstruction = false;
+      if (file.isUnderConstruction()) {
+        BlockEntry lastBlockEntry = stateManager.getLastBlockEntryByFileId(file.id);
+        blockIsUnderConstruction = lastBlockEntry.getBlockId() == block.getBlockId();
+      }
+      // when block is inserted or length is updated from invalid to valid value
+      boolean blockIsAdded = false;
 
-    // check new block is corrupt
-    if (block.getGenerationStamp() < storedBlockEntry.getGenerationStamp()) {
-      LOG.warn("Mark new replica " + block + " from " + node.getName()
-          + "as corrupt because its generation statm is less than existing ones");
-      markBlockAsCorrupt(block, node);
-    } else if (block.getGenerationStamp() == storedBlockEntry.getGenerationStamp()
-        && block.getNumBytes() < storedBlockEntry.getLength()) {
-      LOG.warn("Mark new replica " + block + " from " + node.getName()
-          + "as corrupt because its length is less than existing ones");
-      markBlockAsCorrupt(block, node);
-    } else {
-      // new block is valid and add or update it to the data-node
-      com.taobao.adfs.block.Block storedBlock = storedBlockEntry.getBlock(node.getId());
-      if (storedBlock == null) {
-        storedBlock = new com.taobao.adfs.block.Block();
-        storedBlock.id = storedBlockEntry.getBlockId();
-        storedBlock.fileId = storedBlockEntry.getFileId();
-        storedBlock.fileIndex = storedBlockEntry.getFileIndex();
-        storedBlock.datanodeId = node.getId();
-        storedBlock.length = block.getNumBytes();
-        storedBlock.generationStamp = block.getGenerationStamp();
-        stateManager.insertBlockByBlock(storedBlock);
-        if (storedBlockEntry.onNullDatanode())
-          stateManager.deleteBlockByIdAndDatanodeId(storedBlockEntry.getBlockId(), Datanode.NULL_DATANODE_ID);
-        if (LOG.isDebugEnabled()) LOG.debug("FSNamesystem.addStoredBlock: add " + block + " from " + storedBlock);
-        blockIsAdded = true;
-      } else if (storedBlock.generationStamp != block.getGenerationStamp() || storedBlock.length != block.getNumBytes()) {
-        storedBlock.datanodeId = node.getId();
-        storedBlock.generationStamp = block.getGenerationStamp();
-        storedBlock.length = block.getNumBytes();
-        stateManager.updateBlockByBlock(storedBlock, com.taobao.adfs.block.Block.ALL);
-        if (LOG.isDebugEnabled()) LOG.debug("FSNamesystem.addStoredBlock: update " + block + " from " + storedBlock);
-        if (storedBlock.length < 0) blockIsAdded = true;
+      // check new block is corrupt
+      if (block.getGenerationStamp() < storedBlockEntry.getGenerationStamp()) {
+        LOG.warn("Mark new replica " + block + " from " + node.getName()
+            + "as corrupt because its generation statm is less than existing ones");
+        markBlockAsCorrupt(block, node, lockid);
+      } else if (block.getGenerationStamp() == storedBlockEntry.getGenerationStamp()
+          && block.getNumBytes() < storedBlockEntry.getLength()) {
+        LOG.warn("Mark new replica " + block + " from " + node.getName()
+            + "as corrupt because its length is less than existing ones");
+        markBlockAsCorrupt(block, node, lockid);
       } else {
-        if (LOG.isDebugEnabled()) LOG.debug("FSNamesystem.addStoredBlock: ignore " + block + " from " + storedBlock);
-      }
-      // process corrupt block on other datanodes
-      for (com.taobao.adfs.block.Block storedBlockOnOtherDatanode : storedBlockEntry.getBlockList(false)) {
-        if (storedBlockOnOtherDatanode.datanodeId == storedBlock.datanodeId) continue;
-        boolean isExistingBlockCorrupt = false;
-        if (storedBlockOnOtherDatanode.generationStamp != storedBlock.generationStamp) {
-          isExistingBlockCorrupt = true;
-        } else if (storedBlockOnOtherDatanode.length != storedBlock.length && !blockIsUnderConstruction) {
-          isExistingBlockCorrupt = true;
+        // new block is valid and add or update it to the data-node
+        com.taobao.adfs.block.Block storedBlock = storedBlockEntry.getBlock(node.getId());
+        if (storedBlock == null) {
+          storedBlock = new com.taobao.adfs.block.Block();
+          storedBlock.id = storedBlockEntry.getBlockId();
+          storedBlock.fileId = storedBlockEntry.getFileId();
+          storedBlock.fileIndex = storedBlockEntry.getFileIndex();
+          storedBlock.datanodeId = node.getId();
+          storedBlock.length = block.getNumBytes();
+          storedBlock.generationStamp = block.getGenerationStamp();
+          stateManager.insertBlockByBlock(storedBlock);
+          if (storedBlockEntry.onNullDatanode())
+            stateManager.deleteBlockByIdAndDatanodeId(storedBlockEntry.getBlockId(), Datanode.NULL_DATANODE_ID);
+          if (LOG.isDebugEnabled()) LOG.debug("FSNamesystem.addStoredBlock: add " + block + " from " + storedBlock);
+          blockIsAdded = true;
+        } else if (storedBlock.generationStamp != block.getGenerationStamp()
+            || storedBlock.length != block.getNumBytes()) {
+          storedBlock.datanodeId = node.getId();
+          storedBlock.generationStamp = block.getGenerationStamp();
+          storedBlock.length = block.getNumBytes();
+          stateManager.updateBlockByBlock(storedBlock, com.taobao.adfs.block.Block.ALL);
+          if (LOG.isDebugEnabled()) LOG.debug("FSNamesystem.addStoredBlock: update " + block + " from " + storedBlock);
+          if (storedBlock.length < 0) blockIsAdded = true;
+        } else {
+          if (LOG.isDebugEnabled()) LOG.debug("FSNamesystem.addStoredBlock: ignore " + block + " from " + storedBlock);
         }
-        if (isExistingBlockCorrupt) {
-          LOG.warn("Mark existing replica " + storedBlockOnOtherDatanode + " from "
-              + IpAddress.getIpAndPort(node.getId()) + " as corrupt: storedBlock=" + storedBlock);
-          markBlockAsCorrupt(block, node);
+        // process corrupt block on other datanodes
+        for (com.taobao.adfs.block.Block storedBlockOnOtherDatanode : storedBlockEntry.getBlockList(false)) {
+          if (storedBlockOnOtherDatanode.datanodeId == storedBlock.datanodeId) continue;
+          boolean isExistingBlockCorrupt = false;
+          if (storedBlockOnOtherDatanode.generationStamp != storedBlock.generationStamp) {
+            isExistingBlockCorrupt = true;
+          } else if (storedBlockOnOtherDatanode.length != storedBlock.length && !blockIsUnderConstruction) {
+            isExistingBlockCorrupt = true;
+          }
+          if (isExistingBlockCorrupt) {
+            LOG.warn("Mark existing replica " + storedBlockOnOtherDatanode + " from "
+                + IpAddress.getIpAndPort(node.getId()) + " as corrupt: storedBlock=" + storedBlock);
+            markBlockAsCorrupt(block, node, lockid);
+          }
         }
       }
-    }
 
-    // check replication
+      // check replication
 
-    // if file is being written to, do not check replication-factor. it will be checked when file is closed.
-    if (blockIsUnderConstruction) return block;
-    // do not handle mis-replicated blocks during startup
-    if (isInSafeMode()) return block;
-    // get the statistic for this storedBlockEntry
-    NumberReplicas num = countNodes(storedBlockEntry);
-    int numLiveReplicas = num.liveReplicas();
-    int numCurrentReplica = numLiveReplicas + pendingReplications.getNumReplicas(block);
-    // handle underReplication/overReplication
-    if (numCurrentReplica >= file.replication) {
-      neededReplications.remove(block, numCurrentReplica, num.decommissionedReplicas, file.replication);
-    } else {
-      updateNeededReplications(block, blockIsAdded ? 1 : 0, 0);
+      // if file is being written to, do not check replication-factor. it will be checked when file is closed.
+      if (blockIsUnderConstruction) return block;
+      // do not handle mis-replicated blocks during startup
+      if (isInSafeMode()) return block;
+      // get the statistic for this storedBlockEntry
+      NumberReplicas num = countNodes(storedBlockEntry);
+      int numLiveReplicas = num.liveReplicas();
+      int numCurrentReplica = numLiveReplicas + pendingReplications.getNumReplicas(block);
+      // handle underReplication/overReplication
+      if (numCurrentReplica >= file.replication) {
+        neededReplications.remove(block, numCurrentReplica, num.decommissionedReplicas, file.replication);
+      } else {
+        updateNeededReplications(block, blockIsAdded ? 1 : 0, 0);
+      }
+      if (numCurrentReplica > file.replication) {
+        processOverReplicatedBlock(block, file.replication, node, delNodeHint);
+      }
+      // If the file replication has reached desired value we can remove any corrupt replicas the block may have
+      int corruptReplicasCount = corruptReplicas.numCorruptReplicas(block);
+      int numCorruptNodes = num.corruptReplicas();
+      if (numCorruptNodes != corruptReplicasCount) {
+        LOG.warn("Inconsistent number of corrupt replicas for " + block + "blockMap has " + numCorruptNodes
+            + " but corrupt replicas map has " + corruptReplicasCount);
+      }
+      if ((corruptReplicasCount > 0) && (numLiveReplicas >= file.replication)) invalidateCorruptReplicas(block);
+      return block;
+    } finally {
+      if (lockid != null) {
+        releaseFileLock(lockid);
+      }
     }
-    if (numCurrentReplica > file.replication) {
-      processOverReplicatedBlock(block, file.replication, node, delNodeHint);
-    }
-    // If the file replication has reached desired value we can remove any corrupt replicas the block may have
-    int corruptReplicasCount = corruptReplicas.numCorruptReplicas(block);
-    int numCorruptNodes = num.corruptReplicas();
-    if (numCorruptNodes != corruptReplicasCount) {
-      LOG.warn("Inconsistent number of corrupt replicas for " + block + "blockMap has " + numCorruptNodes
-          + " but corrupt replicas map has " + corruptReplicasCount);
-    }
-    if ((corruptReplicasCount > 0) && (numLiveReplicas >= file.replication)) invalidateCorruptReplicas(block);
-    return block;
   }
 
   /**
@@ -2734,24 +2877,36 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
     }
 
     File file = stateManager.findFileById(blockEntry.getFileId());
-    if (file != null && blockEntry.getBlockList(false).size() == 1 && !blockEntry.onNullDatanode()) {
-      // if this is the last block in the table, insert a block on NULL_DATANODE_ID
-      com.taobao.adfs.block.Block adfsBlock = new com.taobao.adfs.block.Block();
-      adfsBlock.id = blockEntry.getBlockId();
-      adfsBlock.datanodeId = Datanode.NULL_DATANODE_ID;
-      adfsBlock.fileId = blockEntry.getFileId();
-      adfsBlock.fileIndex = blockEntry.getFileIndex();
-      adfsBlock.length = blockEntry.getLength();
-      adfsBlock.generationStamp = blockEntry.getGenerationStamp();
-      stateManager.insertBlockByBlock(adfsBlock);
+    if (file != null) {
+      Integer lockid = getLock(file.path.getBytes(), true);
+      try {
+        if (blockEntry.getBlockList(false).size() == 1 && !blockEntry.onNullDatanode()) {
+          // if this is the last block in the table, insert a block on
+          // NULL_DATANODE_ID
+          com.taobao.adfs.block.Block adfsBlock = new com.taobao.adfs.block.Block();
+          adfsBlock.id = blockEntry.getBlockId();
+          adfsBlock.datanodeId = Datanode.NULL_DATANODE_ID;
+          adfsBlock.fileId = blockEntry.getFileId();
+          adfsBlock.fileIndex = blockEntry.getFileIndex();
+          adfsBlock.length = blockEntry.getLength();
+          adfsBlock.generationStamp = blockEntry.getGenerationStamp();
+          stateManager.insertBlockByBlock(adfsBlock);
+        }
+        stateManager.deleteBlockByIdAndDatanodeId(block.getBlockId(), block.getDatanodeId());
+        NameNode.stateChangeLog.debug("BLOCK* NameSystem.removeStoredBlock: " + block + " from "
+            + IpAddress.getIpAndPort(block.getDatanodeId()));
+        // It's possible that the block was removed because of a datanode
+        // failure.
+        // If the block is still valid, check if replication is necessary.
+        // In that case, put block on a possibly-will-be-replicated list.
+
+        updateNeededReplications(block, -1, 0);
+      } finally {
+        if (lockid != null) {
+          releaseFileLock(lockid);
+        }
+      }
     }
-    stateManager.deleteBlockByIdAndDatanodeId(block.getBlockId(), block.getDatanodeId());
-    NameNode.stateChangeLog.debug("BLOCK* NameSystem.removeStoredBlock: " + block + " from "
-        + IpAddress.getIpAndPort(block.getDatanodeId()));
-    // It's possible that the block was removed because of a datanode failure.
-    // If the block is still valid, check if replication is necessary.
-    // In that case, put block on a possibly-will-be-replicated list.
-    if (file != null) updateNeededReplications(block, -1, 0);
 
     if (node != null) {
       // We've removed a block from a node, so it's definitely no longer in "excess" there.
@@ -3767,16 +3922,21 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
    * 
    * @throws IOException
    */
-  synchronized void enterSafeMode(boolean resourcesLow) throws IOException {
-    if (!isInSafeMode()) {
-      safeMode = new SafeModeInfo(resourcesLow);
-      return;
+  void enterSafeMode(boolean resourcesLow) throws IOException {
+    try {
+      safeModeLock.writeLock().lock();
+      if (!isInSafeMode()) {
+        safeMode = new SafeModeInfo(resourcesLow);
+        return;
+      }
+      if (resourcesLow) {
+        safeMode.setResourcesLow();
+      }
+      safeMode.setManual();
+      NameNode.stateChangeLog.info("STATE* Safe mode is ON. " + safeMode.getTurnOffTip());
+    } finally {
+      safeModeLock.writeLock().unlock();
     }
-    if (resourcesLow) {
-      safeMode.setResourcesLow();
-    }
-    safeMode.setManual();
-    NameNode.stateChangeLog.info("STATE* Safe mode is ON. " + safeMode.getTurnOffTip());
   }
 
   /**
@@ -3784,13 +3944,18 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
    * 
    * @throws IOException
    */
-  synchronized void leaveSafeMode(boolean checkForUpgrades) throws SafeModeException {
-    if (!isInSafeMode()) {
-      NameNode.stateChangeLog.info("STATE* Safe mode is already OFF.");
-      return;
+  void leaveSafeMode(boolean checkForUpgrades) throws SafeModeException {
+    try {
+      this.safeModeLock.writeLock().lock();
+      if (!isInSafeMode()) {
+        NameNode.stateChangeLog.info("STATE* Safe mode is already OFF.");
+        return;
+      }
+      if (getDistributedUpgradeState()) throw new SafeModeException("Distributed upgrade is in progress", safeMode);
+      safeMode.leave(checkForUpgrades);
+    } finally {
+      this.safeModeLock.writeLock().unlock();
     }
-    if (getDistributedUpgradeState()) throw new SafeModeException("Distributed upgrade is in progress", safeMode);
-    safeMode.leave(checkForUpgrades);
   }
 
   String getSafeModeTip() {
@@ -4007,10 +4172,17 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
       throw new IOException(msg);
     }
 
-    // update file version and return it as next block generation stamp
-    file.leaseRecoveryTime = now();
-    file = stateManager.updateFileByFile(file, File.LEASERECOVERYTIME);
-    return file.version;
+    Integer lockid = getLock(file.path.getBytes(), true);
+    try {
+      // update file version and return it as next block generation stamp
+      file.leaseRecoveryTime = now();
+      file = stateManager.updateFileByFile(file, File.LEASERECOVERYTIME);
+      return file.version;
+    } finally {
+      if (lockid != null) {
+        releaseFileLock(lockid);
+      }
+    }
   }
 
   void changeLease(String src, String dst, HdfsFileStatus dinfo) throws IOException {
@@ -4389,7 +4561,7 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
   // new member comes from merging of namenode and state-manager
 
   NameNode namenode = null;
-  StateManager stateManager = null;
+  public StateManager stateManager = null;
   Configuration conf = null;
 
   public StateManager getStateManager() {
@@ -4408,9 +4580,14 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
     }
   }
 
-  synchronized void enterSafeMode() throws IOException {
-    if (!isInSafeMode()) safeMode = new SafeModeInfo(conf);
-    safeMode.checkMode();
+  void enterSafeMode() throws IOException {
+    try {
+      safeModeLock.writeLock().lock();
+      if (!isInSafeMode()) safeMode = new SafeModeInfo(conf);
+      safeMode.checkMode();
+    } finally {
+      safeModeLock.writeLock().unlock();
+    }
   }
 
   synchronized public void startMonitor() throws IOException {
@@ -4467,5 +4644,95 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
 
   public void decommisionCheck() throws IOException {
     if (dnthread != null) ((DecommissionManager.Monitor) dnthread.getRunnable()).check();
+  }
+
+  /**
+   * Returns existing file lock if found, otherwise obtains a new file lock and
+   * returns it.
+   * 
+   * @param lockid
+   *          requested by the user, or null if the user didn't already hold
+   *          lock
+   * @param file
+   *          the file to lock
+   * @param waitForLock
+   *          if true, will block until the lock is available, otherwise will
+   *          simply return null if it could not acquire the lock.
+   * @return lockid or null if waitForLock is false and the lock was
+   *         unavailable.
+   */
+  private Integer getLock(byte[] file, boolean waitForLock) throws IOException {
+    return internalObtainRowLock(file, waitForLock);
+  }
+
+  /**
+   * Obtains or tries to obtain the given file lock.
+   * 
+   * @param waitForLock
+   *          if true, will block until the lock is available. Otherwise, just
+   *          tries to obtain the lock and returns null if unavailable.
+   */
+  private Integer internalObtainRowLock(final byte[] file, boolean waitForLock) throws IOException {
+    HashedBytes fileKey = new HashedBytes(file);
+    CountDownLatch fileLatch = new CountDownLatch(1);
+
+    // loop until we acquire the file lock (unless !waitForLock)
+    while (true) {
+      CountDownLatch existingLatch = lockedFiles.putIfAbsent(fileKey, fileLatch);
+      if (existingLatch == null) {
+        break;
+      } else {
+        // file already locked
+        if (!waitForLock) { return null; }
+        try {
+          if (!existingLatch.await(this.rowLockWaitDuration, TimeUnit.MILLISECONDS)) { return null; }
+        } catch (InterruptedException ie) {
+          // Empty
+        }
+      }
+    }
+
+    // loop until we generate an unused lock id
+    while (true) {
+      Integer lockId = lockIdGenerator.incrementAndGet();
+      HashedBytes existingFileKey = lockIds.putIfAbsent(lockId, fileKey);
+      if (existingFileKey == null) {
+        return lockId;
+      } else {
+        // lockId already in use, jump generator to a new spot
+        lockIdGenerator.set(rand.nextInt());
+      }
+    }
+  }
+
+  /**
+   * Used by unit tests.
+   * 
+   * @param lockid
+   * @return file that goes with <code>lockid</code>
+   */
+  byte[] getFileFromLock(final Integer lockid) {
+    HashedBytes fileKey = lockIds.get(lockid);
+    return fileKey == null ? null : fileKey.getBytes();
+  }
+
+  /**
+   * Release the file lock!
+   * 
+   * @param lockId
+   *          The lock ID to release.
+   */
+  void releaseFileLock(final Integer lockId) {
+    HashedBytes fileKey = lockIds.remove(lockId);
+    if (fileKey == null) {
+      LOG.warn("Release unknown lockId: " + lockId);
+      return;
+    }
+    CountDownLatch fileLatch = lockedFiles.remove(fileKey);
+    if (fileLatch == null) {
+      LOG.error("Releases row not locked, lockId: " + lockId + " file: " + fileKey);
+      return;
+    }
+    fileLatch.countDown();
   }
 }

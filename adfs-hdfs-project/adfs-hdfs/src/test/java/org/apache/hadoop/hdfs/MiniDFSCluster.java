@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *   http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -49,8 +49,14 @@ import org.apache.hadoop.security.authorize.ProxyUsers;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.util.StringUtils;
 import org.apache.hadoop.util.ToolRunner;
+import org.apache.zookeeper.server.NIOServerCnxn;
+import org.apache.zookeeper.server.ServerConfig;
+import org.apache.zookeeper.server.ZooKeeperServer;
+import org.apache.zookeeper.server.persistence.FileTxnSnapLog;
+import org.apache.zookeeper.server.quorum.QuorumPeerConfig.ConfigException;
 import org.apache.zookeeper.server.quorum.QuorumPeerMain;
 
+import com.mysql.jdbc.log.Log;
 import com.taobao.adfs.util.Utilities;
 
 /**
@@ -79,7 +85,8 @@ public class MiniDFSCluster {
                          new ArrayList<DataNodeProperties>();
   private File base_dir;
   private File data_dir;
-  private Thread zkThread;
+  private NIOServerCnxn.Factory cnxnFactory;
+  private ZooKeeperServer zkServer;
   
   
   /**
@@ -101,10 +108,12 @@ public class MiniDFSCluster {
    * @param numDataNodes Number of DataNodes to start; may be zero
    * @param nameNodeOperation the operation with which to start the servers.  If null
    *          or StartupOption.FORMAT, then StartupOption.REGULAR will be used.
+ * @throws InterruptedException 
+ * @throws ConfigException 
    */
   public MiniDFSCluster(Configuration conf,
                         int numDataNodes,
-                        StartupOption nameNodeOperation) throws IOException {
+                        StartupOption nameNodeOperation) throws IOException, ConfigException, InterruptedException {
     this(0, conf, numDataNodes, false, false, false,  nameNodeOperation, 
           null, null, null);
   }
@@ -121,6 +130,8 @@ public class MiniDFSCluster {
    * @param numDataNodes Number of DataNodes to start; may be zero
    * @param format if true, format the NameNode and DataNodes before starting up
    * @param racks array of strings indicating the rack that each DataNode is on
+ * @throws InterruptedException 
+ * @throws ConfigException 
    */
   public MiniDFSCluster(Configuration conf,
                         int numDataNodes,
@@ -142,11 +153,13 @@ public class MiniDFSCluster {
    * @param format if true, format the NameNode and DataNodes before starting up
    * @param racks array of strings indicating the rack that each DataNode is on
    * @param hosts array of strings indicating the hostname for each DataNode
+ * @throws InterruptedException 
+ * @throws ConfigException 
    */
   public MiniDFSCluster(Configuration conf,
                         int numDataNodes,
                         boolean format,
-                        String[] racks, String[] hosts) throws IOException {
+                        String[] racks, String[] hosts) throws IOException, ConfigException, InterruptedException {
     this(0, conf, numDataNodes, format, true, true, null, racks, hosts, null);
   }
   
@@ -167,6 +180,8 @@ public class MiniDFSCluster {
    * @param operation the operation with which to start the servers.  If null
    *          or StartupOption.FORMAT, then StartupOption.REGULAR will be used.
    * @param racks array of strings indicating the rack that each DataNode is on
+ * @throws InterruptedException 
+ * @throws ConfigException 
    */
   public MiniDFSCluster(int nameNodePort, 
                         Configuration conf,
@@ -174,7 +189,7 @@ public class MiniDFSCluster {
                         boolean format,
                         boolean manageDfsDirs,
                         StartupOption operation,
-                        String[] racks) throws IOException {
+                        String[] racks) throws IOException{
     this(nameNodePort, conf, numDataNodes, format, manageDfsDirs, manageDfsDirs,
          operation, racks, null, null);
   }
@@ -197,6 +212,8 @@ public class MiniDFSCluster {
    *          or StartupOption.FORMAT, then StartupOption.REGULAR will be used.
    * @param racks array of strings indicating the rack that each DataNode is on
    * @param simulatedCapacities array of capacities of the simulated data nodes
+ * @throws InterruptedException 
+ * @throws ConfigException 
    */
   public MiniDFSCluster(int nameNodePort, 
                         Configuration conf,
@@ -205,11 +222,37 @@ public class MiniDFSCluster {
                         boolean manageDfsDirs,
                         StartupOption operation,
                         String[] racks,
-                        long[] simulatedCapacities) throws IOException {
+                        long[] simulatedCapacities) throws IOException{
     this(nameNodePort, conf, numDataNodes, format, manageDfsDirs, manageDfsDirs,
           operation, racks, null, simulatedCapacities);
   }
   
+  public void startZookeeper(String []args) throws ConfigException, IOException, InterruptedException{
+	  ServerConfig config = new ServerConfig();
+	  if (args.length == 1) {
+          config.parse(args[0]);
+      } else {
+          config.parse(args);
+      }
+	  zkServer = new ZooKeeperServer();
+	  FileTxnSnapLog ftxn = new FileTxnSnapLog(new
+              File(config.getDataLogDir()), new File(config.getDataDir()));
+      zkServer.setTxnLogFactory(ftxn);
+      zkServer.setTickTime(config.getTickTime());
+      zkServer.setMinSessionTimeout(config.getMinSessionTimeout());
+      zkServer.setMaxSessionTimeout(config.getMaxSessionTimeout());
+      cnxnFactory = new NIOServerCnxn.Factory(config.getClientPortAddress(),
+               config.getMaxClientCnxns());
+      cnxnFactory.startup(zkServer);
+  }
+  
+  public void stopZookeeper() throws InterruptedException{
+	  cnxnFactory.interrupt();
+	  while (zkServer.isRunning()){
+		  zkServer.shutdown();
+		  Thread.sleep(5000);
+	  }
+  }
   /**
    * NOTE: if possible, the other constructors that don't have nameNode port 
    * parameter should be used as they will ensure that the servers use free ports.
@@ -231,6 +274,8 @@ public class MiniDFSCluster {
    * @param racks array of strings indicating the rack that each DataNode is on
    * @param hosts array of strings indicating the hostnames of each DataNode
    * @param simulatedCapacities array of capacities of the simulated data nodes
+ * @throws InterruptedException 
+ * @throws ConfigException 
    */
   public MiniDFSCluster(int nameNodePort, 
                         Configuration conf,
@@ -240,7 +285,7 @@ public class MiniDFSCluster {
                         boolean manageDataDfsDirs,
                         StartupOption operation,
                         String[] racks, String hosts[],
-                        long[] simulatedCapacities) throws IOException {
+                        long[] simulatedCapacities) throws IOException{
     this.conf = conf;
     base_dir = getBaseDir();
     data_dir = new File(base_dir, "data");
@@ -263,19 +308,24 @@ public class MiniDFSCluster {
     conf.setInt("dfs.namenode.decommission.interval", 3); // 3 second
     conf.set("distributed.manager.address", "127.0.0.1:21810");
     conf.set("distributed.manager.election.delay.time", "1000");
+    conf.set("dfs.replication","1");
+    conf.setLong("mysql.server.data.path.old.expire.time", 0);
     // Set a small delay on blockReceived in the minicluster to approximate
     // a real cluster a little better and suss out bugs.
     conf.setInt("dfs.datanode.artificialBlockReceivedDelay", 5);
-    conf.set("distributed.logger.levels", "com.taobao.tbfs.distributed.DistributedServer=warn,com.taobao.tbfs.distributed.DistributedClient=warn,com.taobao.tbfs.distributed.DistributedLocker=warn");
+    //conf.set("distributed.logger.levels", "com.taobao.tbfs.distributed.DistributedServer=warn,com.taobao.tbfs.distributed.DistributedClient=warn,com.taobao.tbfs.distributed.DistributedLocker=warn");
     final String dataPath = "target/" + TestDFSMkdirs.class.getSimpleName() + "/zookeeperServerData";
     Utilities.mkdirs(dataPath, true);
-    zkThread = new Thread() {
-      public void run() {
-        QuorumPeerMain.main(new String[] { "21810", dataPath });
-      }
-    };
-    zkThread.start();
-  
+    try{
+    	startZookeeper(new String[] { "21810", dataPath });
+    }catch(ConfigException e){
+    	e.printStackTrace();
+    }catch(InterruptedException e){
+    	e.printStackTrace();
+    }catch(Throwable t){
+    	t.printStackTrace();
+    }
+    
     try {
 			Thread.sleep(3000);
 		} catch (InterruptedException e) {
@@ -576,7 +626,11 @@ public class MiniDFSCluster {
       nameNode.join();
       nameNode = null;
     }
-    zkThread.stop();
+    try {
+    	stopZookeeper();
+    } catch(Throwable e) {
+    	e.printStackTrace();
+    }
   }
   
   /**
@@ -1017,7 +1071,7 @@ public class MiniDFSCluster {
    * Set the softLimit and hardLimit of client lease periods
    */
   void setLeasePeriod(long soft, long hard) {
-    //nameNode.namesystem.leaseManager.setLeasePeriod(soft, hard);
+    nameNode.namesystem.stateManager.setLeasePeriod(soft, hard);
     nameNode.namesystem.lmthread.interrupt();
   }
 

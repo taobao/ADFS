@@ -344,31 +344,6 @@ public class LeaseManager {
     this.softLimit = softLimit;
     this.hardLimit = hardLimit; 
   }
-  
-  /******************************************************
-   * Monitor checks for leases that have expired,
-   * and disposes of them.
-   ******************************************************/
-  class Monitor implements Runnable {
-    final String name = getClass().getSimpleName();
-
-    /** Check leases periodically. */
-    public void run() {
-      for(; fsnamesystem.isRunning(); ) {
-        synchronized(fsnamesystem) {
-          checkLeases();
-        }
-
-        try {
-          Thread.sleep(2000);
-        } catch(InterruptedException ie) {
-          if (LOG.isDebugEnabled()) {
-            LOG.debug(name + " is interrupted", ie);
-          }
-        }
-      }
-    }
-  }
 
   /** Check the leases beginning from the oldest. */
   synchronized void checkLeases() {

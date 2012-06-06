@@ -624,7 +624,7 @@ public class NameNode extends DistributedDataBaseOnDatabase implements NamenodeP
       DatanodeInfo[] nodes = blocks[i].getLocations();
       for (int j = 0; j < nodes.length; j++) {
         DatanodeInfo dn = nodes[j];
-        namesystem.markBlockAsCorrupt(blk, dn);
+        namesystem.markBlockAsCorrupt(blk, dn, null);
       }
     }
   }
