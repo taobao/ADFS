@@ -35,9 +35,9 @@ import com.taobao.adfs.util.Utilities;
  */
 public class ZookeeperClientManager {
   public static final Logger logger = LoggerFactory.getLogger(ZookeeperClientManager.class);
-  private static Map<String, ZooKeeper> zookeeperRepository = new HashMap<String, ZooKeeper>();
+  private Map<String, ZooKeeper> zookeeperRepository = new HashMap<String, ZooKeeper>();
 
-  static public synchronized ZooKeeper create(String connectString, int sessionTimeout) throws IOException {
+  public synchronized ZooKeeper create(String connectString, int sessionTimeout) throws IOException {
     ZooKeeper zookeeper = zookeeperRepository.get(connectString);
     if (zookeeper != null) {
       Utilities.logDebug(logger, "reuse zookeeper client, address=", connectString);
@@ -54,7 +54,7 @@ public class ZookeeperClientManager {
     return zookeeper;
   }
 
-  static public synchronized void close(String connectString) {
+  public synchronized void close(String connectString) {
     try {
       ZooKeeper zookeeper = zookeeperRepository.remove(connectString);
       if (zookeeper != null) zookeeper.close();

@@ -47,7 +47,7 @@ import com.taobao.adfs.util.Utilities;
 public class DistributedClient implements Closeable, InvocationHandler {
   public static final Logger logger = LoggerFactory.getLogger(DistributedClient.class);
   ServerStatus masterServer = null;
-  DistributedManager serverManager = null;
+  DistributedManager distributedManager = null;
   DistributedMonitor distributedMonitor = null;
   Configuration conf = null;
   protected Object operationProxy = null;
@@ -181,8 +181,8 @@ public class DistributedClient implements Closeable, InvocationHandler {
   }
 
   synchronized DistributedManager getServerManager() throws IOException {
-    if (serverManager == null) serverManager = new DistributedManager(conf);
-    return serverManager;
+    if (distributedManager == null) distributedManager = new DistributedManager(conf);
+    return distributedManager;
   }
 
   @Override
@@ -190,6 +190,7 @@ public class DistributedClient implements Closeable, InvocationHandler {
     Utilities.logDebug(logger, "start to close client");
     if (distributedLeaseThread != null) distributedLeaseThread.close();
     if (masterServer != null && masterServer.proxy != null) RPC.stopProxy(masterServer.proxy);
+    if (distributedManager != null) distributedManager.close();
     Utilities.logDebug(logger, "succeed in closing client");
   }
 
@@ -372,6 +373,10 @@ public class DistributedClient implements Closeable, InvocationHandler {
               break;
             }
             Utilities.sleepAndProcessInterruptedException(10, logger);
+          }
+          if (shouldClose.get()) {
+            isClosed.set(true);
+            break;
           }
         }
       }

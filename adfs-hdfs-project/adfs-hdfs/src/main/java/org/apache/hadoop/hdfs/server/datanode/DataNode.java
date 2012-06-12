@@ -812,9 +812,9 @@ public class DataNode extends Configured
       } catch (InterruptedException ie) {
       }
     }
-    
+
     DistributedClient.close(namenode); // stop the RPC threads
-    
+
     if(upgradeManager != null)
       upgradeManager.shutdownUpgrade();
     if (blockScannerThread != null) { 

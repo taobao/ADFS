@@ -171,6 +171,11 @@ public class TestFileCreation extends junit.framework.TestCase {
     stm.close();
   }
 
+  public void testMinicluster() throws IOException{
+	  Configuration conf = new Configuration();
+	  MiniDFSCluster cluster = new MiniDFSCluster(conf, 1, true, null);
+	  cluster.shutdown();
+  }
   /**
    * Test that file data becomes available before file is closed.
  * @throws InterruptedException 

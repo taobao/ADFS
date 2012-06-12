@@ -74,6 +74,7 @@ public class TestFileCreationDelete extends junit.framework.TestCase {
 
       // restart cluster with the same namenode port as before.
       // This ensures that leases are persisted in fsimage.
+      fs.close();
       cluster.shutdown();
       try {Thread.sleep(2*MAX_IDLE_TIME);} catch (InterruptedException e) {}
       cluster = new MiniDFSCluster(nnport, conf, 1, false, true, 

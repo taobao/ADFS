@@ -781,6 +781,7 @@ public class DistributedServer implements DistributedInvocable {
     rpcServer.stop();
     unregister(serverName);
     if (distributedMetrics != null) distributedMetrics.shutdown();
+    if (distributedManager != null) distributedManager.close();
     log(Level.INFO, " has been stopped");
     serverType = ServerType.STOP;
   }

@@ -247,10 +247,16 @@ public class MiniDFSCluster {
   }
   
   public void stopZookeeper() throws InterruptedException{
-	  cnxnFactory.interrupt();
 	  while (zkServer.isRunning()){
 		  zkServer.shutdown();
 		  Thread.sleep(5000);
+	  }
+	  cnxnFactory.shutdown();
+  }
+  
+  public void stopDataNode(){
+	  for (DataNodeProperties dnp:dataNodes){
+		  dnp.datanode.shutdown();
 	  }
   }
   /**
@@ -309,6 +315,7 @@ public class MiniDFSCluster {
     conf.set("distributed.manager.address", "127.0.0.1:21810");
     conf.set("distributed.manager.election.delay.time", "1000");
     conf.set("dfs.replication","1");
+    conf.setInt("distributed.manager.retry.times", 1);
     conf.setLong("mysql.server.data.path.old.expire.time", 0);
     // Set a small delay on blockReceived in the minicluster to approximate
     // a real cluster a little better and suss out bugs.
@@ -627,6 +634,8 @@ public class MiniDFSCluster {
       nameNode = null;
     }
     try {
+    	stopDataNode();
+    	Thread.sleep(10000);
     	stopZookeeper();
     } catch(Throwable e) {
     	e.printStackTrace();

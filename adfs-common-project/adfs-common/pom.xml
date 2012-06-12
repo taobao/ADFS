@@ -40,9 +40,9 @@
       <scope>compile</scope>
     </dependency>
     <dependency>
-      <groupId>org.apache.hadoop</groupId>
+      <groupId>org.apache.hadoop.thirdparty.guava</groupId>
       <artifactId>guava</artifactId>
-      <version>1.0</version>
+      <version>r09-jarjar</version>
       <scope>compile</scope>
     </dependency>
     <dependency>

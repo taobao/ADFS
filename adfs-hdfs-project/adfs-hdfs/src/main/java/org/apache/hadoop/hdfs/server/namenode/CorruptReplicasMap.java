@@ -21,70 +21,81 @@ import org.apache.hadoop.hdfs.protocol.Block;
 import org.apache.hadoop.ipc.Server;
 
 import java.util.*;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
  * Stores information about all corrupt blocks in the File System.
  * A Block is considered corrupt only if all of its replicas are
  * corrupt. While reporting replicas of a Block, we hide any corrupt
- * copies. These copies are removed once Block is found to have 
+ * copies. These copies are removed once Block is found to have
  * expected number of good replicas.
- * Mapping: Block -> TreeSet<DatanodeDescriptor> 
+ * Mapping: Block -> TreeSet<DatanodeDescriptor>
  */
 
-public class CorruptReplicasMap{
+public class CorruptReplicasMap {
+
+  private ReentrantReadWriteLock readWriteLock = new ReentrantReadWriteLock();
 
   private Map<Block, Collection<DatanodeDescriptor>> corruptReplicasMap =
-    new TreeMap<Block, Collection<DatanodeDescriptor>>();
-  
+      new TreeMap<Block, Collection<DatanodeDescriptor>>();
+
   /**
    * Mark the block belonging to datanode as corrupt.
-   *
-   * @param blk Block to be added to CorruptReplicasMap
-   * @param dn DatanodeDescriptor which holds the corrupt replica
+   * 
+   * @param blk
+   *          Block to be added to CorruptReplicasMap
+   * @param dn
+   *          DatanodeDescriptor which holds the corrupt replica
    */
   public void addToCorruptReplicasMap(Block blk, DatanodeDescriptor dn) {
-    Collection<DatanodeDescriptor> nodes = getNodes(blk);
-    if (nodes == null) {
-      nodes = new TreeSet<DatanodeDescriptor>();
-      corruptReplicasMap.put(blk, nodes);
-    }
-    if (!nodes.contains(dn)) {
-      nodes.add(dn);
-      NameNode.stateChangeLog.info("BLOCK NameSystem.addToCorruptReplicasMap: "+
-                                   blk.getBlockName() +
-                                   " added as corrupt on " + dn.getName() +
-                                   " by " + Server.getRemoteIp());
-    } else {
-      NameNode.stateChangeLog.info("BLOCK NameSystem.addToCorruptReplicasMap: "+
-                                   "duplicate requested for " + 
-                                   blk.getBlockName() + " to add as corrupt " +
-                                   "on " + dn.getName() +
-                                   " by " + Server.getRemoteIp());
+    try {
+      Collection<DatanodeDescriptor> nodes = getNodes(blk);
+      readWriteLock.writeLock().lock();
+      if (nodes == null) {
+        nodes = Collections.synchronizedSortedSet(new TreeSet<DatanodeDescriptor>());
+        corruptReplicasMap.put(blk, nodes);
+      }
+      if (!nodes.contains(dn)) {
+        nodes.add(dn);
+        NameNode.stateChangeLog.info("BLOCK NameSystem.addToCorruptReplicasMap: " + blk.getBlockName()
+            + " added as corrupt on " + dn.getName() + " by " + Server.getRemoteIp());
+      } else {
+        NameNode.stateChangeLog.info("BLOCK NameSystem.addToCorruptReplicasMap: " + "duplicate requested for "
+            + blk.getBlockName() + " to add as corrupt " + "on " + dn.getName() + " by " + Server.getRemoteIp());
+      }
+    } finally {
+      readWriteLock.writeLock().unlock();
     }
   }
 
   /**
    * Remove Block from CorruptBlocksMap
-   *
-   * @param blk Block to be removed
+   * 
+   * @param blk
+   *          Block to be removed
    */
   void removeFromCorruptReplicasMap(Block blk) {
-    if (corruptReplicasMap != null) {
+    try {
+      readWriteLock.writeLock().lock();
       corruptReplicasMap.remove(blk);
+    } finally {
+      readWriteLock.writeLock().unlock();
     }
   }
 
   /**
    * Remove the block at the given datanode from CorruptBlockMap
-   * @param blk block to be removed
-   * @param datanode datanode where the block is located
-   * @return true if the removal is successful; 
-             false if the replica is not in the map
-   */ 
+   * 
+   * @param blk
+   *          block to be removed
+   * @param datanode
+   *          datanode where the block is located
+   * @return true if the removal is successful;
+   *         false if the replica is not in the map
+   */
   boolean removeFromCorruptReplicasMap(Block blk, DatanodeDescriptor datanode) {
     Collection<DatanodeDescriptor> datanodes = corruptReplicasMap.get(blk);
-    if (datanodes==null)
-      return false;
+    if (datanodes == null) return false;
     if (datanodes.remove(datanode)) { // remove the replicas
       if (datanodes.isEmpty()) {
         // remove the block if there is no more corrupted replicas
@@ -94,23 +105,30 @@ public class CorruptReplicasMap{
     }
     return false;
   }
-    
 
   /**
    * Get Nodes which have corrupt replicas of Block
    * 
-   * @param blk Block for which nodes are requested
+   * @param blk
+   *          Block for which nodes are requested
    * @return collection of nodes. Null if does not exists
    */
   Collection<DatanodeDescriptor> getNodes(Block blk) {
-    return corruptReplicasMap.get(blk);
+    try {
+      readWriteLock.readLock().lock();
+      return corruptReplicasMap.get(blk);
+    } finally {
+      readWriteLock.readLock().unlock();
+    }
   }
 
   /**
    * Check if replica belonging to Datanode is corrupt
-   *
-   * @param blk Block to check
-   * @param node DatanodeDescriptor which holds the replica
+   * 
+   * @param blk
+   *          Block to check
+   * @param node
+   *          DatanodeDescriptor which holds the replica
    * @return true if replica is corrupt, false if does not exists in this map
    */
   boolean isReplicaCorrupt(Block blk, DatanodeDescriptor node) {
@@ -122,8 +140,13 @@ public class CorruptReplicasMap{
     Collection<DatanodeDescriptor> nodes = getNodes(blk);
     return (nodes == null) ? 0 : nodes.size();
   }
-  
+
   public int size() {
-    return corruptReplicasMap.size();
+    try {
+      readWriteLock.readLock().lock();
+      return corruptReplicasMap.size();
+    } finally {
+      readWriteLock.readLock().unlock();
+    }
   }
 }

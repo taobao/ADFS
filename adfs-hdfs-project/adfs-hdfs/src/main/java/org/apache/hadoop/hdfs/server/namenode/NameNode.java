@@ -33,7 +33,6 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.ContentSummary;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.fs.Trash;
 import org.apache.hadoop.fs.permission.FsPermission;
 import org.apache.hadoop.fs.permission.PermissionStatus;
 import org.apache.hadoop.hdfs.DFSConfigKeys;
@@ -175,7 +174,6 @@ public class NameNode extends DistributedDataBaseOnDatabase implements NamenodeP
   private HttpServer httpServer;
   /** HTTP server address */
   private InetSocketAddress httpAddress = null;
-  private Thread emptier;
   /** only used for testing purposes */
   private boolean stopRequested = false;
   /** Is service level authorization enabled? */
@@ -286,12 +284,6 @@ public class NameNode extends DistributedDataBaseOnDatabase implements NamenodeP
     distributedServer = new DistributedServer(this);
     LOG.info("Namenode up at: " + conf.get("distributed.server.name"));
     // startHttpServer(conf);
-  }
-
-  public void startTrashEmptier(Configuration conf) throws IOException {
-    this.emptier = new Thread(new Trash(conf).getEmptier(), "Trash Emptier");
-    this.emptier.setDaemon(true);
-    this.emptier.start();
   }
 
   @SuppressWarnings("deprecation")
@@ -439,6 +431,7 @@ public class NameNode extends DistributedDataBaseOnDatabase implements NamenodeP
     if (pluginDispatcher != null) {
       pluginDispatcher.dispatchStop();
     }
+    if (namenodeClient != null) DistributedClient.close(namenodeClient);
     try {
       if (httpServer != null) httpServer.stop();
     } catch (Exception e) {
@@ -449,7 +442,6 @@ public class NameNode extends DistributedDataBaseOnDatabase implements NamenodeP
     } catch (IOException e) {
       LOG.warn(e);
     }
-    if (emptier != null) emptier.interrupt();
     if (server != null) server.stop();
     if (serviceRpcServer != null) serviceRpcServer.stop();
     if (myMetrics != null) {
@@ -624,7 +616,7 @@ public class NameNode extends DistributedDataBaseOnDatabase implements NamenodeP
       DatanodeInfo[] nodes = blocks[i].getLocations();
       for (int j = 0; j < nodes.length; j++) {
         DatanodeInfo dn = nodes[j];
-        namesystem.markBlockAsCorrupt(blk, dn, null);
+        namesystem.markBlockAsCorrupt(blk, dn);
       }
     }
   }

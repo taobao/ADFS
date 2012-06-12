@@ -42,6 +42,7 @@ import com.taobao.adfs.util.Utilities;
  */
 public class ZookeeperClientRetry {
   public static final Logger logger = LoggerFactory.getLogger(DistributedManager.class);
+  ZookeeperClientManager zookeeperClientManager = new ZookeeperClientManager();
   String addresses;
   int sessionTimeout;
   int retryTimes;
@@ -55,12 +56,12 @@ public class ZookeeperClientRetry {
     this.retryDelayTime = retryDelayTime;
   }
 
-  ZooKeeper getZookeeperClient() throws IOException {
-    return ZookeeperClientManager.create(addresses, sessionTimeout);
+  public ZooKeeper getZookeeperClient() throws IOException {
+    return zookeeperClientManager.create(addresses, sessionTimeout);
   }
 
-  void closeZookeeperClient() {
-    ZookeeperClientManager.close(addresses);
+  public void closeZookeeperClient() {
+    zookeeperClientManager.close(addresses);
   }
 
   public int getSessionTimeout() throws IOException {

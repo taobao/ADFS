@@ -66,10 +66,13 @@ public class StateManager {
   private static long hardLimit = FSConstants.LEASE_HARDLIMIT_PERIOD;
 
   public void setLeasePeriod(long softLimit, long hardLimit) {
-    this.softLimit = softLimit;
-    this.hardLimit = hardLimit; 
+    StateManager.softLimit = softLimit;
+    StateManager.hardLimit = hardLimit;
   }
-  
+
+  /**
+   * StateManager constructor.
+   */
   public StateManager(FileRepository fileRepository, BlockRepository blockRepository,
       DatanodeRepository datanodeRepository, LeaseRepository leaseRepository) {
     this.fileRepository = fileRepository;
@@ -78,23 +81,49 @@ public class StateManager {
     this.leaseRepository = leaseRepository;
   }
 
-  // for FileProtocol
-
+  // ///////////////////////////////////////////////////
+  // FileProtocol
+  // ///////////////////////////////////////////////////
+  /**
+   * Directory or File
+   */
   public boolean isDir(String path) throws IOException {
     File file = findFileByPath(path);
     return file != null && file.isDir();
   }
 
+  /**
+   * get file status
+   * 
+   * @param path
+   *          file path
+   * @return
+   * @throws IOException
+   */
   public HdfsFileStatus getFileInfo(String path) throws IOException {
     return adfsFileToHdfsFileStatus(findFileByPath(path));
   }
 
+  /**
+   * use blockId map file 
+   * 
+   * @param blockId
+   * @return
+   * @throws IOException
+   */
   public HdfsFileStatus getFileInfoByBlockId(long blockId) throws IOException {
     BlockEntry blockEntry = getBlockEntryByBlockId(blockId);
     if (blockEntry == null) return null;
     else return getFileInfo(blockEntry.getFileId());
   }
 
+  /**
+   * use fileId to find file
+   * 
+   * @param id fileId 
+   * @return
+   * @throws IOException
+   */
   public HdfsFileStatus getFileInfo(long id) throws IOException {
     return adfsFileToHdfsFileStatus(findFileById(id));
   }
@@ -103,7 +132,9 @@ public class StateManager {
     return adfsFileArrayToHdfsFileStatusArray(findFileChildrenByPath(path));
   }
 
-  // for BlockProtocol
+  // ///////////////////////////////////////////////////
+  // BlockProtocol
+  // ///////////////////////////////////////////////////
 
   public BlockEntry getBlockEntryByBlockId(long blockId) throws IOException {
     List<BlockEntry> blockEntryList = BlockEntry.getBlockEntryList(findBlockById(blockId));
@@ -834,20 +865,22 @@ public class StateManager {
     final String name = getClass().getSimpleName();
 
     public void run() {
-      try {
-        long expiredHardLimitTime = System.currentTimeMillis() - hardLimit;
-        List<Lease> leaseList = FSNamesystem.getFSStateManager().findLeaseByTimeLessThan(expiredHardLimitTime);
-        for (Lease lease : leaseList) {
-          List<File> fileList = FSNamesystem.getFSStateManager().findFileByLeaseHolder(lease.holder);
-          for (File file : fileList) {
-            FSNamesystem.getFSNamesystem().internalReleaseLeaseOne(file, lease.holder);
-          }
-          FSNamesystem.getFSStateManager().deleteLeaseByLease(lease);
-        }
-        Thread.sleep(2000);
-      } catch (Throwable t) {
-        FSNamesystem.LOG.error(t);
-      }
+     while(FSNamesystem.getFSNamesystem().isRunning()){
+       try {
+         long expiredHardLimitTime = System.currentTimeMillis() - hardLimit;
+         List<Lease> leaseList = FSNamesystem.getFSStateManager().findLeaseByTimeLessThan(expiredHardLimitTime);
+         for (Lease lease : leaseList) {
+           List<File> fileList = FSNamesystem.getFSStateManager().findFileByLeaseHolder(lease.holder);
+           for (File file : fileList) {
+             FSNamesystem.getFSNamesystem().internalReleaseLeaseOne(file, lease.holder);
+           }
+           FSNamesystem.getFSStateManager().deleteLeaseByLease(lease);
+         }
+         Thread.sleep(2000);
+       } catch (Throwable t) {
+         FSNamesystem.LOG.error(t);
+       }
+     }
     }
   }
 }

@@ -28,6 +28,7 @@ import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Date;
 import java.util.EnumSet;
 import java.util.Formatter;
@@ -57,6 +58,7 @@ import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.ContentSummary;
 import org.apache.hadoop.fs.FileAlreadyExistsException;
+import org.apache.hadoop.fs.Trash;
 import org.apache.hadoop.fs.permission.FsPermission;
 import org.apache.hadoop.fs.permission.PermissionStatus;
 import org.apache.hadoop.hdfs.DFSConfigKeys;
@@ -111,14 +113,13 @@ import org.apache.hadoop.util.StringUtils;
 import org.apache.hadoop.util.VersionInfo;
 import org.mortbay.util.ajax.JSON;
 
-import com.taobao.adfs.util.HashedBytes;
-
 import com.taobao.adfs.block.BlockEntry;
 import com.taobao.adfs.datanode.Datanode;
 import com.taobao.adfs.distributed.DistributedException;
 import com.taobao.adfs.file.File;
 import com.taobao.adfs.lease.Lease;
 import com.taobao.adfs.state.StateManager;
+import com.taobao.adfs.util.HashedBytes;
 import com.taobao.adfs.util.IpAddress;
 
 /***************************************************
@@ -181,14 +182,14 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
   /**
    * Store blocks-->datanodedescriptor(s) map of corrupt replicas
    */
-  public CorruptReplicasMap corruptReplicas = new CorruptReplicasMap();
+  public CorruptReplicasMap corruptReplicas;
 
   /**
    * Keeps a Collection for every named machine containing
    * blocks that have recently been invalidated and are thought to live on the machine in question.
    * Mapping: StorageID -> ArrayList<Block>
    */
-  private Map<String, Collection<Block>> recentInvalidateSets = new TreeMap<String, Collection<Block>>();
+  private Map<String, Collection<Block>> recentInvalidateSets;
 
   /**
    * Keeps a TreeSet for every named node. Each treeset contains
@@ -196,12 +197,12 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
    * eventually remove these extras.
    * Mapping: StorageID -> TreeSet<Block>
    */
-  Map<String, Collection<Block>> excessReplicateMap = new TreeMap<String, Collection<Block>>();
+  Map<String, Collection<Block>> excessReplicateMap;
 
   /**
    * Store set of Blocks that need to be replicated 1 or more times.
    */
-  UnderReplicatedBlocks neededReplications = new UnderReplicatedBlocks();
+  UnderReplicatedBlocks neededReplications;
   /**
    * We also store pending replication-orders. Set of: Block
    */
@@ -219,11 +220,13 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
 
   private final AtomicInteger lockIdGenerator = new AtomicInteger(1);
 
-  int rowLockWaitDuration;
+  int fileLockWaitDuration;
 
   static private Random rand = new Random();
 
-  static final int DEFAULT_ROWLOCK_WAIT_DURATION = 30000;
+  static final int DEFAULT_FILELOCK_WAIT_DURATION = 30000;
+
+  final ThreadLocal<Map<byte[], Integer>> threadLocal = new ThreadLocal<Map<byte[], Integer>>();
   // file lock ////
 
   private ReentrantReadWriteLock safeModeLock;
@@ -297,6 +300,7 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
   // precision of access times.
   private long accessTimePrecision = 0;
   private String nameNodeHostName;
+  private Thread emptier;
 
   /**
    * FSNamesystem constructor.
@@ -333,6 +337,7 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
     this.safeModeLock = new ReentrantReadWriteLock();
     setConfigurationParameters(conf);
 
+    this.fileLockWaitDuration = conf.getInt("hdfs.file.lock.wait.duration", DEFAULT_FILELOCK_WAIT_DURATION);
     this.nameNodeAddress = nn.getNameNodeAddress();
     this.registerMBean(conf); // register the MBean for the FSNamesystemStutus
 
@@ -359,11 +364,11 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
         new StateManager(namenode.fileRepository, namenode.blockRepository, namenode.datanodeRepository,
             namenode.leaseRepository);
     corruptReplicas = new CorruptReplicasMap();
-    excessReplicateMap = new TreeMap<String, Collection<Block>>();
+    excessReplicateMap = Collections.synchronizedSortedMap(new TreeMap<String, Collection<Block>>());
     neededReplications = new UnderReplicatedBlocks();
     pendingReplications =
         new PendingReplicationBlocks(namenode.conf.getInt("dfs.replication.pending.timeout.sec", -1) * 1000L);
-    recentInvalidateSets = new TreeMap<String, Collection<Block>>();
+    recentInvalidateSets = Collections.synchronizedSortedMap(new TreeMap<String, Collection<Block>>());
   }
 
   public static Collection<java.io.File> getNamespaceDirs(Configuration conf) {
@@ -444,7 +449,7 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
   }
 
   /** Is this name system running? */
-  boolean isRunning() {
+  public boolean isRunning() {
     return fsRunning;
   }
 
@@ -643,7 +648,7 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
     // seek the block by offset
     int curBlk = 0;
     long curPos = 0, blkSize = 0;
-    int blockNumber = (blockEntryList.get(0).getLength() == 0) ? 0 : blockEntryList.size();
+    int blockNumber = (blockEntryList.get(0).getLength() < 0) ? 0 : blockEntryList.size();
     for (curBlk = 0; curBlk < blockNumber; curBlk++) {
       blkSize = blockEntryList.get(curBlk).getLength();
       assert blkSize > 0 : "Block of size " + blkSize;
@@ -671,6 +676,10 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
       boolean blockCorrupt = false;
 
       List<com.taobao.adfs.block.Block> blockListExcludeUnderConstruction = blockEntry.getBlockList(true);
+      if (blockEntry.getBlockList(false).isEmpty()) {
+        curBlk++;
+        continue;
+      }
       if (file.isUnderConstruction() && curBlk == blockEntryList.size() - 1
           && blockListExcludeUnderConstruction.isEmpty()) {
         // get unfinished block locations
@@ -690,7 +699,9 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
           }
         }
       }
-      LocatedBlock b = new LocatedBlock(blockEntry.getHdfsBlock(), machineSet, curPos, blockCorrupt);
+      Block hdfsBlock = blockEntry.getHdfsBlock();
+      if (hdfsBlock.getNumBytes() == -1) hdfsBlock.set(hdfsBlock.getBlockId(), 0, hdfsBlock.getGenerationStamp());
+      LocatedBlock b = new LocatedBlock(hdfsBlock, machineSet, curPos, blockCorrupt);
       if (isAccessTokenEnabled && needBlockToken) {
         b.setBlockToken(accessTokenHandler.generateToken(b.getBlock(), EnumSet
             .of(BlockTokenSecretManager.AccessMode.READ)));
@@ -995,13 +1006,6 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
   }
 
   /**
-   * Stub for old callers pre-HDFS-630
-   */
-  public LocatedBlock getAdditionalBlock(String src, String clientName) throws IOException {
-    return getAdditionalBlock(src, clientName, null);
-  }
-
-  /**
    * The client would like to obtain an additional block for the indicated
    * filename (which is being written-to). Return an array that consists
    * of the block, plus a set of machines. The first on this list should
@@ -1029,14 +1033,21 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
         + targets.length + " nodes, instead of " + minReplication); }
 
     // allocate new block
-    com.taobao.adfs.block.Block newBlock = allocateBlock(file, blockEntryList.size(), targets);
-    newBlock.length = 0;// Hadoop Block readFields will throw a IOException if length<0
-    LocatedBlock b = new LocatedBlock(StateManager.adfsBlockToHdfsBlock(newBlock), targets, file.length);
+    Integer lockid = getLock(src.getBytes(), true);
+    try {
+      com.taobao.adfs.block.Block newBlock = allocateBlock(file, blockEntryList.size(), targets);
+      newBlock.length = 0;// Hadoop Block readFields will throw a IOException if length<0
+      LocatedBlock b = new LocatedBlock(StateManager.adfsBlockToHdfsBlock(newBlock), targets, file.length);
 
-    for (DatanodeDescriptor dn : targets) {
-      dn.incBlocksScheduled();
+      for (DatanodeDescriptor dn : targets) {
+        dn.incBlocksScheduled();
+      }
+      return b;
+    } finally {
+      if (lockid != null) {
+        releaseFileLock(lockid);
+      }
     }
-    return b;
   }
 
   /**
@@ -1227,7 +1238,7 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
    * @param dn
    *          Datanode which holds the corrupt replica
    */
-  public void markBlockAsCorrupt(Block blk, DatanodeInfo dn, Integer lockid) throws IOException {
+  public void markBlockAsCorrupt(Block blk, DatanodeInfo dn) throws IOException {
     DatanodeDescriptor node = dn == null ? null : stateManager.getDatanodeDescriptorByDatanodeId(dn.getId());
     if (node == null) { throw new IOException("Cannot mark block" + blk.getBlockName()
         + " as corrupt because datanode " + dn.getName() + " does not exist. "); }
@@ -1248,11 +1259,7 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
         addToInvalidates(blk, dn, true);
         return;
       }
-      boolean fileLockedByCurrentThread = true;
-      if (lockid == null) {
-        lockid = getLock(file.path.getBytes(), true);
-        fileLockedByCurrentThread = false;
-      }
+      Integer lockid = getLock(file.path.getBytes(), true);
       try {
         // Add this replica to corruptReplicas Map
         corruptReplicas.addToCorruptReplicasMap(blk, node);
@@ -1265,18 +1272,11 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
           updateNeededReplications(blk, -1, 0);
         }
       } finally {
-        if (lockid != null && !fileLockedByCurrentThread) {
+        if (lockid != null) {
           releaseFileLock(lockid);
         }
       }
     }
-  }
-
-  /**
-   * avoid compile error for ut
-   */
-  public void markBlockAsCorrupt(Block blk, DatanodeInfo dn) throws IOException {
-    markBlockAsCorrupt(blk, dn, null);
   }
 
   /**
@@ -1503,6 +1503,16 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
     // Initialize lease recovery for pendingFile. If there are no blocks associated with this file,
     // then reap lease immediately. Otherwise renew the lease and trigger lease recovery.
     if (targets == null || targets.length == 0) {
+      // delete blocks for test case: they are allocated and have not been received from data nodes
+      if (lastBlockEntry != null && lastBlockEntry.getLength() < 0) {
+        com.taobao.adfs.block.Block leftBlock =
+            new com.taobao.adfs.block.Block(lastBlockEntry.getBlockId(), -1, lastBlockEntry.getGenerationStamp(),
+                lastBlockEntry.getFileId(), Datanode.NULL_DATANODE_ID, lastBlockEntry.getFileIndex());
+        stateManager.insertBlockByBlock(leftBlock);
+        for (com.taobao.adfs.block.Block block : lastBlockEntry.getBlockList(false)) {
+          stateManager.deleteBlockByIdAndDatanodeId(block.id, block.datanodeId);
+        }
+      }
       finalizeINodeFileUnderConstruction(file, blockEntryList);
       NameNode.stateChangeLog.warn("BLOCK* internalReleaseLease: No blocks found, commit " + file + " from " + holder);
       return;
@@ -2590,12 +2600,12 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
       if (block.getGenerationStamp() < storedBlockEntry.getGenerationStamp()) {
         LOG.warn("Mark new replica " + block + " from " + node.getName()
             + "as corrupt because its generation statm is less than existing ones");
-        markBlockAsCorrupt(block, node, lockid);
+        markBlockAsCorrupt(block, node);
       } else if (block.getGenerationStamp() == storedBlockEntry.getGenerationStamp()
           && block.getNumBytes() < storedBlockEntry.getLength()) {
         LOG.warn("Mark new replica " + block + " from " + node.getName()
             + "as corrupt because its length is less than existing ones");
-        markBlockAsCorrupt(block, node, lockid);
+        markBlockAsCorrupt(block, node);
       } else {
         // new block is valid and add or update it to the data-node
         com.taobao.adfs.block.Block storedBlock = storedBlockEntry.getBlock(node.getId());
@@ -2635,7 +2645,7 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
           if (isExistingBlockCorrupt) {
             LOG.warn("Mark existing replica " + storedBlockOnOtherDatanode + " from "
                 + IpAddress.getIpAndPort(node.getId()) + " as corrupt: storedBlock=" + storedBlock);
-            markBlockAsCorrupt(block, node, lockid);
+            markBlockAsCorrupt(block, node);
           }
         }
       }
@@ -2877,9 +2887,12 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
     }
 
     File file = stateManager.findFileById(blockEntry.getFileId());
+    Integer lockid = null;
     if (file != null) {
-      Integer lockid = getLock(file.path.getBytes(), true);
-      try {
+      lockid = getLock(file.path.getBytes(), true);
+    }
+    try {
+      if (file != null) {
         if (blockEntry.getBlockList(false).size() == 1 && !blockEntry.onNullDatanode()) {
           // if this is the last block in the table, insert a block on
           // NULL_DATANODE_ID
@@ -2892,19 +2905,21 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
           adfsBlock.generationStamp = blockEntry.getGenerationStamp();
           stateManager.insertBlockByBlock(adfsBlock);
         }
-        stateManager.deleteBlockByIdAndDatanodeId(block.getBlockId(), block.getDatanodeId());
+      }
+      stateManager.deleteBlockByIdAndDatanodeId(block.getBlockId(), block.getDatanodeId());
+
+      if (file != null) {
         NameNode.stateChangeLog.debug("BLOCK* NameSystem.removeStoredBlock: " + block + " from "
             + IpAddress.getIpAndPort(block.getDatanodeId()));
         // It's possible that the block was removed because of a datanode
         // failure.
         // If the block is still valid, check if replication is necessary.
         // In that case, put block on a possibly-will-be-replicated list.
-
         updateNeededReplications(block, -1, 0);
-      } finally {
-        if (lockid != null) {
-          releaseFileLock(lockid);
-        }
+      }
+    } finally {
+      if (lockid != null) {
+        releaseFileLock(lockid);
       }
     }
 
@@ -4608,7 +4623,9 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
             conf.getInt("dfs.namenode.decommission.nodes.per.interval", 5)));
     dnthread.start();
 
-    namenode.startTrashEmptier(conf);
+    emptier = new Thread(Trash.getEmptier(conf), "Trash Emptier");
+    emptier.setDaemon(true);
+    emptier.start();
   }
 
   synchronized public void stopMonitor() throws IOException {
@@ -4618,6 +4635,7 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
       if (hbthread != null) hbthread.interrupt();
       if (replthread != null) replthread.interrupt();
       if (dnthread != null) dnthread.interrupt();
+      if (emptier != null) emptier.interrupt();
     } catch (Throwable t) {
       throw new IOException(t);
     } finally {
@@ -4675,6 +4693,14 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
   private Integer internalObtainRowLock(final byte[] file, boolean waitForLock) throws IOException {
     HashedBytes fileKey = new HashedBytes(file);
     CountDownLatch fileLatch = new CountDownLatch(1);
+    Map<byte[], Integer> currentThreadLatch = threadLocal.get();
+    if (currentThreadLatch == null) {
+      currentThreadLatch = new HashMap<byte[], Integer>();
+      threadLocal.set(currentThreadLatch);
+    }
+
+    Integer reference = currentThreadLatch.get(file);
+    if (reference != null) { return null; }
 
     // loop until we acquire the file lock (unless !waitForLock)
     while (true) {
@@ -4685,12 +4711,15 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
         // file already locked
         if (!waitForLock) { return null; }
         try {
-          if (!existingLatch.await(this.rowLockWaitDuration, TimeUnit.MILLISECONDS)) { return null; }
+          if (!existingLatch.await(this.fileLockWaitDuration, TimeUnit.MILLISECONDS)) { return null; }
         } catch (InterruptedException ie) {
           // Empty
         }
       }
     }
+
+    reference = new Integer(1);
+    currentThreadLatch.put(file, reference);
 
     // loop until we generate an unused lock id
     while (true) {
@@ -4734,5 +4763,9 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
       return;
     }
     fileLatch.countDown();
+    Map<byte[], Integer> currentThreadLatch = threadLocal.get();
+    if (currentThreadLatch != null) {
+      currentThreadLatch.remove(fileKey.getBytes());
+    }
   }
 }

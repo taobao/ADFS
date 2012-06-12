@@ -26,6 +26,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.taobao.adfs.database.DatabaseExecutor.Comparator;
+import com.taobao.adfs.distributed.DistributedDataCache;
 import com.taobao.adfs.distributed.DistributedDataRepositoryBaseOnTable;
 
 /**
@@ -79,5 +80,11 @@ public class LeaseRepository extends DistributedDataRepositoryBaseOnTable {
     } catch (Throwable t) {
       return false;
     }
+  }
+
+  @Override
+  protected DistributedDataCache getCache() throws IOException {
+    // TODO Auto-generated method stub
+    return null;
   }
 }

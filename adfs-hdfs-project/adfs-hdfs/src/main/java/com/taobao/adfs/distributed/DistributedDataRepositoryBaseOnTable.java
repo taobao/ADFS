@@ -125,9 +125,7 @@ abstract public class DistributedDataRepositoryBaseOnTable {
   protected void createMeta() throws IOException {
   }
 
-  protected DistributedDataCache getCache() throws IOException {
-    return null;
-  }
+  abstract protected DistributedDataCache getCache() throws IOException;
 
   protected void clear() throws IOException {
     long maxVersion = findVersionFromData();

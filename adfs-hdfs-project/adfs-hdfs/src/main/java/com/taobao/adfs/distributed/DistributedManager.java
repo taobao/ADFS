@@ -263,6 +263,10 @@ public class DistributedManager {
     }
   }
 
+  synchronized public void close() {
+    zookeeperClientRetry.closeZookeeperClient();
+  }
+
   Invocation invocationToGetStatusForLog = null;
 
   Object[] getStatus() {

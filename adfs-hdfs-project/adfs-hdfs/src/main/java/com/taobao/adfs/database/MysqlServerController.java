@@ -230,6 +230,15 @@ public class MysqlServerController {
     return moveData(mysqlDataPath, expireTimeOfOldMysqlData);
   }
 
+  public String getMysqlLibPath(String mysqlBinPath) {
+    String mysqlLibPath = "";
+    for (String binPath : mysqlBinPath.split(":")) {
+      if (binPath.isEmpty()) continue;
+      mysqlLibPath += binPath + "/../lib/mysql:";
+    }
+    return mysqlLibPath;
+  }
+
   public void formatData(Configuration conf) throws IOException {
     Utilities.logInfo(logger, "mysql server is formatting");
     setMysqlDefaultConf(conf);
@@ -258,9 +267,8 @@ public class MysqlServerController {
         "use mysql;delete from user;grant all privileges on *.* to 'root'@'%' identified by 'root';flush privileges;";
     commandForSetMysqlAccess += "\"";
     Utilities.logInfo(logger, "mysql server is setting privileges, command=", commandForSetMysqlAccess);
-    Utilities.runCommand(commandForSetMysqlAccess, 0, conf.get("mysql.server.bin.path"), conf
-        .get("mysql.server.bin.path")
-        + "/../lib/mysql");
+    Utilities.runCommand(commandForSetMysqlAccess, 0, conf.get("mysql.server.bin.path"), getMysqlLibPath(conf
+        .get("mysql.server.bin.path")));
     Utilities.logInfo(logger, "mysql server has set privileges");
 
     // create database
@@ -291,9 +299,8 @@ public class MysqlServerController {
     commandForCreateDatabase += "\"";
     commandForCreateDatabase = commandForCreateDatabase.replaceAll("`", "\\\\`");
     Utilities.logInfo(logger, "mysql server is creating database(s), command=", commandForCreateDatabase);
-    Utilities.runCommand(commandForCreateDatabase, 0, conf.get("mysql.server.bin.path"), conf
-        .get("mysql.server.bin.path")
-        + "/../lib/mysql");
+    Utilities.runCommand(commandForCreateDatabase, 0, conf.get("mysql.server.bin.path"), getMysqlLibPath(conf
+        .get("mysql.server.bin.path")));
     Utilities.logInfo(logger, "mysql server has created database(s)");
   }
 
