@@ -168,6 +168,12 @@
       <artifactId>annotations</artifactId>
       <version>8.0</version>
     </dependency>
+    <dependency>
+      <groupId>commons-email</groupId>
+      <artifactId>commons-email</artifactId>
+      <version>1.1</version>
+      <scope>compile</scope>
+    </dependency>
     <!--for tdhs client end-->
   </dependencies>
 

@@ -560,6 +560,8 @@ public class TestFileCreation extends junit.framework.TestCase {
     conf.setInt("ipc.client.connection.maxidletime", MAX_IDLE_TIME);
     conf.setInt("heartbeat.recheck.interval", 1000);
     conf.setInt("dfs.heartbeat.interval", 1);
+    conf.set("slave.host.name", "localhost");
+    conf.setInt("distributed.client.retry.number", 3);
     if (simulatedStorage) {
       conf.setBoolean(SimulatedFSDataset.CONFIG_PROPERTY_SIMULATED, true);
     }
@@ -678,14 +680,14 @@ public class TestFileCreation extends junit.framework.TestCase {
                                   file1.toString(), 0, Long.MAX_VALUE);
       System.out.println("locations = " + locations.locatedBlockCount());
       assertTrue("Error blocks were not cleaned up for file " + file1,
-                 locations.locatedBlockCount() == 3);
+                 locations.locatedBlockCount() == 2);
 
       // verify filestatus2.dat
       locations = client.namenode.getBlockLocations(
                                   file2.toString(), 0, Long.MAX_VALUE);
       System.out.println("locations = " + locations.locatedBlockCount());
       assertTrue("Error blocks were not cleaned up for file " + file2,
-                 locations.locatedBlockCount() == 1);
+                 locations.locatedBlockCount() == 0);
     } finally {
       IOUtils.closeStream(fs);
       cluster.shutdown();

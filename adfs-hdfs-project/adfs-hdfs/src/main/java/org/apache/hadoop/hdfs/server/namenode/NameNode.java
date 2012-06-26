@@ -451,7 +451,9 @@ public class NameNode extends DistributedDataBaseOnDatabase implements NamenodeP
       namesystem.shutdown();
     }
     try {
-      distributedServer.stop();
+        if (distributedServer != null){
+            distributedServer.stop();
+        }
     } catch (IOException e) {
       LOG.warn(e);
     }

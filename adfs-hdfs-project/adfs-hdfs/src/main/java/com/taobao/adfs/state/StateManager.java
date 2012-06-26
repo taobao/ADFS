@@ -101,11 +101,17 @@ public class StateManager {
    * @throws IOException
    */
   public HdfsFileStatus getFileInfo(String path) throws IOException {
-    return adfsFileToHdfsFileStatus(findFileByPath(path));
+    File file = findFileByPath(path);
+    if(file == null ) return null;
+    if (file.length <= 0) {
+      List<BlockEntry> blockEntryList = this.getBlockEntryListByFileId(file.id);
+      file.length = BlockEntry.getTotalLength(blockEntryList);
+    }
+    return adfsFileToHdfsFileStatus(file);
   }
 
   /**
-   * use blockId map file 
+   * use blockId map file
    * 
    * @param blockId
    * @return
@@ -120,7 +126,8 @@ public class StateManager {
   /**
    * use fileId to find file
    * 
-   * @param id fileId 
+   * @param id
+   *          fileId
    * @return
    * @throws IOException
    */
@@ -412,11 +419,28 @@ public class StateManager {
         int port = IpAddress.getPort(datanodeDescriptor.getId());
         if (getDatanodeDescriptorByDatanodeId(datanodeDescriptor.getId()) == null) {
           Map<Integer, DatanodeDescriptor> portToDatanodeDescriptorMap = addressToDatanodeDescriptor.get(ip);
+          DatanodeDescriptor nodeByStorage = getDatanodeDescriptorByStorageId(datanodeDescriptor.getStorageID());
+
+          if (nodeByStorage != null) {
+            int nodeIp = IpAddress.getIp(nodeByStorage.getId());
+            int nodePort = IpAddress.getPort(nodeByStorage.getId());
+            if (portToDatanodeDescriptorMap != null) {
+              portToDatanodeDescriptorMap.remove(nodePort);
+            }
+            
+            storageIdToDatanodeDescriptor.remove(nodeByStorage.getStorageID());
+
+            clusterMap.remove(nodeByStorage);
+            datanodeRepository.delete(datanodeDescriptorToAdfsDatanode(nodeByStorage));
+          }
+
           if (portToDatanodeDescriptorMap == null) {
             portToDatanodeDescriptorMap = new ConcurrentHashMap<Integer, DatanodeDescriptor>();
             addressToDatanodeDescriptor.put(ip, portToDatanodeDescriptorMap);
           }
+          
           portToDatanodeDescriptorMap.put(port, datanodeDescriptor);
+
           storageIdToDatanodeDescriptor.put(datanodeDescriptor.getStorageID(), datanodeDescriptor);
           clusterMap.remove(datanodeDescriptor);
           if (AdminStates.NORMAL.equals(datanodeDescriptor.getAdminState())) clusterMap.add(datanodeDescriptor);
@@ -452,33 +476,38 @@ public class StateManager {
   AtomicBoolean clusterStatisticsIsUpdating = new AtomicBoolean(false);
 
   private void updateClusterStatistics() {
-    if (System.currentTimeMillis() - clusterStatisticsLastUpdateTime > 1000) {
-      if (!clusterStatisticsIsUpdating.compareAndSet(false, true)) return;
+    while (clusterStatisticsIsUpdating.get()) {
       try {
-        long clusterLoad = 0;
-        long clusterCapacity = 0L;
-        long clusterRemaining = 0L;
-        long clusterDfsUsed = 0L;
-        long clusterLiveDatanode = 0L;
-        for (DatanodeDescriptor datanodeDescriptor : getDatanodeDescriptorList(true)) {
-          if (datanodeDescriptor == null) continue;
-          clusterLoad += datanodeDescriptor.getXceiverCount();
-          clusterCapacity += datanodeDescriptor.getCapacity();
-          clusterRemaining += datanodeDescriptor.getRemaining();
-          clusterDfsUsed += datanodeDescriptor.getDfsUsed();
-          clusterLiveDatanode += datanodeDescriptor.isAlive ? 1 : 0;
-        }
-        this.clusterLoad += clusterLoad;
-        this.clusterCapacity += clusterCapacity;
-        this.clusterRemaining += clusterRemaining;
-        this.clusterDfsUsed += clusterDfsUsed;
-        this.clusterLiveDatanode += clusterLiveDatanode;
-        this.clusterStatisticsLastUpdateTime = System.currentTimeMillis();
-      } catch (Throwable t) {
-        Utilities.logWarn(logger, t);
-      } finally {
-        clusterStatisticsIsUpdating.set(false);
+        Thread.sleep(100);
+      } catch (InterruptedException e) {
+        // TODO Auto-generated catch block
+        e.printStackTrace();
       }
+    }
+    try {
+      long clusterLoad = 0;
+      long clusterCapacity = 0L;
+      long clusterRemaining = 0L;
+      long clusterDfsUsed = 0L;
+      long clusterLiveDatanode = 0L;
+      for (DatanodeDescriptor datanodeDescriptor : getDatanodeDescriptorList(true)) {
+        if (datanodeDescriptor == null) continue;
+        clusterLoad += datanodeDescriptor.getXceiverCount();
+        clusterCapacity += datanodeDescriptor.getCapacity();
+        clusterRemaining += datanodeDescriptor.getRemaining();
+        clusterDfsUsed += datanodeDescriptor.getDfsUsed();
+        clusterLiveDatanode += datanodeDescriptor.isAlive ? 1 : 0;
+      }
+      this.clusterLoad = clusterLoad;
+      this.clusterCapacity = clusterCapacity;
+      this.clusterRemaining = clusterRemaining;
+      this.clusterDfsUsed = clusterDfsUsed;
+      this.clusterLiveDatanode = clusterLiveDatanode;
+      this.clusterStatisticsLastUpdateTime = System.currentTimeMillis();
+    } catch (Throwable t) {
+      Utilities.logWarn(logger, t);
+    } finally {
+      clusterStatisticsIsUpdating.set(false);
     }
   }
 
@@ -865,22 +894,22 @@ public class StateManager {
     final String name = getClass().getSimpleName();
 
     public void run() {
-     while(FSNamesystem.getFSNamesystem().isRunning()){
-       try {
-         long expiredHardLimitTime = System.currentTimeMillis() - hardLimit;
-         List<Lease> leaseList = FSNamesystem.getFSStateManager().findLeaseByTimeLessThan(expiredHardLimitTime);
-         for (Lease lease : leaseList) {
-           List<File> fileList = FSNamesystem.getFSStateManager().findFileByLeaseHolder(lease.holder);
-           for (File file : fileList) {
-             FSNamesystem.getFSNamesystem().internalReleaseLeaseOne(file, lease.holder);
-           }
-           FSNamesystem.getFSStateManager().deleteLeaseByLease(lease);
-         }
-         Thread.sleep(2000);
-       } catch (Throwable t) {
-         FSNamesystem.LOG.error(t);
-       }
-     }
+      while (FSNamesystem.getFSNamesystem().isRunning()) {
+        try {
+          long expiredHardLimitTime = System.currentTimeMillis() - hardLimit;
+          List<Lease> leaseList = FSNamesystem.getFSStateManager().findLeaseByTimeLessThan(expiredHardLimitTime);
+          for (Lease lease : leaseList) {
+            List<File> fileList = FSNamesystem.getFSStateManager().findFileByLeaseHolder(lease.holder);
+            for (File file : fileList) {
+              FSNamesystem.getFSNamesystem().internalReleaseLeaseOne(file, lease.holder);
+            }
+            FSNamesystem.getFSStateManager().deleteLeaseByLease(lease);
+          }
+          Thread.sleep(2000);
+        } catch (Throwable t) {
+          FSNamesystem.LOG.error(t);
+        }
+      }
     }
   }
 }

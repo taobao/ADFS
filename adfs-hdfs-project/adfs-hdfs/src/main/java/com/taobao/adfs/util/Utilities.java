@@ -210,7 +210,7 @@ public class Utilities {
     return newArgs.toArray(new String[newArgs.size()]);
   }
 
-  public static Map<String, String> getConf(Configuration conf, String prefix) throws IOException {
+  public static Map<String, String> getConf(Configuration conf, String prefix) throws Throwable {
     Map<String, String> confMap = new HashMap<String, String>();
     if (conf == null) return confMap;
     Properties properties = (Properties) new Invocation(conf.getClass(), "getProps").invoke(conf);
@@ -732,8 +732,8 @@ public class Utilities {
       Object result = objecsFromInvocation == null ? null : objecsFromInvocation.invoke();
       Object[] resultObjectArray = result instanceof Object[] ? (Object[]) result : null;
       return log(logger, level, resultObjectArray, objects);
-    } catch (IOException e) {
-      Utilities.logWarn(logger, "fail to log for ", objecsFromInvocation, e);
+    } catch (Throwable t) {
+      Utilities.logWarn(logger, "fail to log for ", objecsFromInvocation, t);
       return "";
     }
   }
@@ -798,7 +798,7 @@ public class Utilities {
     }
   }
 
-  public static void configureLog4j(Configuration conf, String loggerConfKeyPrefix, Level level) throws IOException {
+  public static void configureLog4j(Configuration conf, String loggerConfKeyPrefix, Level level) throws Throwable {
     if (conf == null) conf = new Configuration(false);
     if (loggerConfKeyPrefix == null) loggerConfKeyPrefix = "";
     setConfDefaultValue(conf, loggerConfKeyPrefix + "log4j.rootLogger", "INFO,console");
@@ -901,7 +901,7 @@ public class Utilities {
     return true;
   }
 
-  public static Object repeatInvoke(long repeat, Invocation invocation) throws IOException {
+  public static Object repeatInvoke(long repeat, Invocation invocation) throws Throwable {
     for (int i = 0; i < repeat; ++i) {
       invocation.invoke();
     }

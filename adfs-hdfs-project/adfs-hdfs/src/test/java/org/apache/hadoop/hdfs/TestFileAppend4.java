@@ -121,6 +121,8 @@ public class TestFileAppend4 extends TestCase {
     // Delay blockReceived calls from DNs to be more similar to a real
     // cluster. 10ms is enough so that client often gets there first.
     conf.setInt("dfs.datanode.artificialBlockReceivedDelay", 10);
+    conf.set("slave.host.name", "localhost");
+    conf.setInt("distributed.client.retry.number", 3);
   }
 
   @Override
@@ -382,6 +384,7 @@ public class TestFileAppend4 extends TestCase {
       // recover 3 bbw files
       for (int i : files) {
         file1 = paths[i];
+        LOG.info(file1);
         recoverFile(fs2);
         assertFileSize(fs2, BBW_SIZE); 
         checkFile(fs2, BBW_SIZE);
@@ -399,7 +402,7 @@ public class TestFileAppend4 extends TestCase {
   public void testAppendSyncBlockPlusBbw() throws Exception {
     LOG.info("START");
     cluster = new MiniDFSCluster(conf, 1, true, null);
-    FileSystem fs1 = cluster.getFileSystem();;
+    FileSystem fs1 = cluster.getFileSystem();
     FileSystem fs2 = AppendTestUtil.createHdfsWithDifferentUsername(fs1.getConf());
     try {
       createFile(fs1, "/blockPlusBbw.test", 1, BLOCK_SIZE + BBW_SIZE);
@@ -465,9 +468,10 @@ public class TestFileAppend4 extends TestCase {
        * recoverBlock() commands from the remaining DFSClient as datanodes 
        * are serially shutdown
        */
+      stm.close();
+      fs1.close();
       cluster.getNameNode().setSafeMode(SafeModeAction.SAFEMODE_ENTER);
       cluster.shutdown();
-      fs1.close();
       LOG.info("STOPPED first instance of the cluster");
       cluster = new MiniDFSCluster(conf, 3, false, null);
       cluster.getNameNode().getNamesystem().stallReplicationWork();

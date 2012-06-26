@@ -121,7 +121,7 @@ public class DistributedPerformance {
         while (count.getAndIncrement() < repeat) {
           try {
             invocation.invoke();
-          } catch (IOException e) {
+          } catch (Throwable e) {
             e.printStackTrace();
           }
         }

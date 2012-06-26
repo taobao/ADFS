@@ -38,7 +38,7 @@ public class DistributedDataTest {
   static ExampleData exampleData = null;
 
   @BeforeClass
-  static public void setupAfterClass() throws Exception {
+  static public void setupAfterClass() throws Throwable {
     Utilities.configureLog4j(null, "distributed.logger.conf.", Level.DEBUG);
     Configuration conf = new Configuration(false);
     conf.set("distributed.data.path", "target/test" + DistributedDataTest.class.getSimpleName());

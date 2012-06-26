@@ -134,7 +134,6 @@ public class DistributedClient implements Closeable, InvocationHandler {
   }
 
   public Class<?>[] getDistributedDataProtocols(Configuration conf) throws IOException {
-    conf.set("distributed.client.enabled", "true");
     try {
       String dataClassName = conf.get("distributed.data.class.name");
       if (dataClassName != null) return ClassCache.get(dataClassName).getInterfaces();
@@ -153,7 +152,6 @@ public class DistributedClient implements Closeable, InvocationHandler {
   }
 
   public static String getDistributedDataTypeName(Configuration conf) throws IOException {
-    conf.set("distributed.client.enabled", "true");
     String dataClassName = conf.get("distributed.data.class.name");
     if (dataClassName != null) return dataClassName;
     for (ServerStatus serverStatus : new DistributedManager(conf).getServers(null).get()) {
@@ -211,8 +209,7 @@ public class DistributedClient implements Closeable, InvocationHandler {
     int retrySleepTime = conf.getInt("distributed.client.retry.sleep", 10000);
     for (int i = 0; i < retryNumber; ++i) {
       try {
-        if (distributedLeaseThread.shouldClose.get())
-          throw new IOException(getClass().getSimpleName() + " has been closed");
+        if (distributedLeaseThread.shouldClose.get()) break;
         long startTime = System.currentTimeMillis();
         if (masterServer == null) throw new IOException("no master to do call " + invocation);
         if (masterServer.proxy == null) throw new IOException("no proxy to " + masterServer.name);
@@ -227,18 +224,19 @@ public class DistributedClient implements Closeable, InvocationHandler {
         if (t instanceof RemoteException
             && ((!DistributedException.isNeedRestore(t) && !DistributedException.isRefuseCall(t)))) {
           // part data is written and thrown an exception when write remaining data
-          Utilities.logInfo(logger, "request ", masterServer.name, " to do ", invocation, " exception=", t);
+          Utilities.logInfo(logger, "request ", masterServer == null ? null : masterServer.name, " to do ", invocation, " exception=", t);
           throw t;
         }
-        Utilities.logWarn(logger, "fail to request ", masterServer.name, " to do ", invocation, ", retryIndex=", i,
-            ", maxRetryIndex=", retryNumber - 1, " exception=", t);
+        Utilities.logWarn(logger, "fail to request ", masterServer == null ? null : masterServer.name, " to do ",
+            invocation, ", retryIndex=", i, ", maxRetryIndex=", retryNumber - 1, " exception=", t);
         if (i < retryNumber - 1) {
           Utilities.sleepAndProcessInterruptedException(retrySleepTime, logger);
           updateServers();
         } else throw t;
       }
     }
-    throw new IOException("never to here");
+    if (!distributedLeaseThread.shouldClose.get()) throw new IOException("never to here");
+    else throw new IOException(getClass().getSimpleName() + " has been closed");
   }
 
   boolean isProxyValid(DistributedInvocable proxy) {
@@ -300,7 +298,7 @@ public class DistributedClient implements Closeable, InvocationHandler {
     return masterServer;
   }
 
-  public synchronized void followConfSettings() throws IOException {
+  public synchronized void followConfSettings() throws Throwable {
     if (masterServer == null || masterServer.proxy == null) return;
     String excludeString = conf.get("distributed.conf.follow.excludes");
     if (excludeString == null) excludeString = "";
@@ -325,7 +323,7 @@ public class DistributedClient implements Closeable, InvocationHandler {
     }
   }
 
-  public synchronized void followLoggerLevels() throws IOException {
+  public synchronized void followLoggerLevels() throws Throwable {
     if (masterServer == null || masterServer.proxy == null) return;
     String[] excludes = conf.getStrings("distributed.logger.follow.excludes");
     String[] loggerInfos = new DistributedMonitor(conf, masterServer.name).getLoggerInfos();

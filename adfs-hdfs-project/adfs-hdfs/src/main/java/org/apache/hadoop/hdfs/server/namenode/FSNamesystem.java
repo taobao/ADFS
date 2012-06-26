@@ -38,11 +38,11 @@ import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Random;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
-import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -69,12 +69,12 @@ import org.apache.hadoop.hdfs.protocol.BlockListAsLongs;
 import org.apache.hadoop.hdfs.protocol.ClientProtocol;
 import org.apache.hadoop.hdfs.protocol.DatanodeID;
 import org.apache.hadoop.hdfs.protocol.DatanodeInfo;
+import org.apache.hadoop.hdfs.protocol.DatanodeInfo.AdminStates;
 import org.apache.hadoop.hdfs.protocol.DirectoryListing;
 import org.apache.hadoop.hdfs.protocol.FSConstants;
 import org.apache.hadoop.hdfs.protocol.HdfsFileStatus;
 import org.apache.hadoop.hdfs.protocol.LocatedBlock;
 import org.apache.hadoop.hdfs.protocol.LocatedBlocks;
-import org.apache.hadoop.hdfs.protocol.DatanodeInfo.AdminStates;
 import org.apache.hadoop.hdfs.security.token.block.BlockTokenSecretManager;
 import org.apache.hadoop.hdfs.security.token.block.ExportedBlockKeys;
 import org.apache.hadoop.hdfs.security.token.delegation.DelegationTokenIdentifier;
@@ -85,13 +85,14 @@ import org.apache.hadoop.hdfs.server.common.UpgradeStatusReport;
 import org.apache.hadoop.hdfs.server.namenode.UnderReplicatedBlocks.BlockIterator;
 import org.apache.hadoop.hdfs.server.namenode.metrics.FSNamesystemMBean;
 import org.apache.hadoop.hdfs.server.namenode.metrics.FSNamesystemMetrics;
+import org.apache.hadoop.hdfs.server.protocol.BlockCommand;
 import org.apache.hadoop.hdfs.server.protocol.BlocksWithLocations;
+import org.apache.hadoop.hdfs.server.protocol.BlocksWithLocations.BlockWithLocations;
 import org.apache.hadoop.hdfs.server.protocol.DatanodeCommand;
 import org.apache.hadoop.hdfs.server.protocol.DatanodeRegistration;
 import org.apache.hadoop.hdfs.server.protocol.DisallowedDatanodeException;
 import org.apache.hadoop.hdfs.server.protocol.NamespaceInfo;
 import org.apache.hadoop.hdfs.server.protocol.UpgradeCommand;
-import org.apache.hadoop.hdfs.server.protocol.BlocksWithLocations.BlockWithLocations;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.ipc.Server;
 import org.apache.hadoop.metrics.util.MBeanUtil;
@@ -103,8 +104,8 @@ import org.apache.hadoop.net.ScriptBasedMapping;
 import org.apache.hadoop.security.AccessControlException;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.security.UserGroupInformation.AuthenticationMethod;
-import org.apache.hadoop.security.token.Token;
 import org.apache.hadoop.security.token.SecretManager.InvalidToken;
+import org.apache.hadoop.security.token.Token;
 import org.apache.hadoop.security.token.delegation.DelegationKey;
 import org.apache.hadoop.util.Daemon;
 import org.apache.hadoop.util.HostsFileReader;
@@ -944,8 +945,9 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
         // If the original holder has not renewed in the last SOFTLIMIT period, then start lease recovery.
         if (StateManager.expiredSoftLimit(lease.time)) {
           LOG.info("startFile: recover lease for " + file + " from client " + file.leaseHolder);
+          String oldHolder = file.leaseHolder;
           internalReleaseLeaseOne(file, holder);
-          List<File> fileList = stateManager.findFileByLeaseHolder(file.leaseHolder);
+          List<File> fileList = stateManager.findFileByLeaseHolder(oldHolder);
           for (File fileWithSameLeaseHolder : fileList) {
             internalReleaseLeaseOne(fileWithSameLeaseHolder, holder);
           }
@@ -988,6 +990,13 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
                 iter.remove();
               }
             }
+          }
+        }
+        List<com.taobao.adfs.block.Block> lastBlocks = lastBlockEntry.getBlockList(true);
+        if (lastBlocks != null && !lastBlocks.isEmpty()) {
+          for (int i = 0; i < lastBlocks.size(); i++) {
+            lastBlocks.get(i).length = -1;
+            stateManager.updateBlockByBlock(lastBlocks.get(i), com.taobao.adfs.block.Block.LENGTH);
           }
         }
       }
@@ -1171,7 +1180,9 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
           }
       } else stateManager.insertBlockByBlock(block);
     }
-    NameNode.stateChangeLog.info("BLOCK* NameSystem.allocateBlock: " + block + " for " + file);
+    block.datanodeId = 0;
+    NameNode.stateChangeLog.info("BLOCK* NameSystem.allocateBlock: " + block + " on " + Arrays.deepToString(targets)
+        + " for " + file);
     return block;
   }
 
@@ -1317,11 +1328,15 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
   /** Change the indicated filename. */
   public boolean renameTo(String src, String dst) throws IOException {
     File file = renameToInternal(src, dst);
-    if (auditLog.isInfoEnabled() && isExternalInvocation()) {
-      final HdfsFileStatus stat = StateManager.adfsFileToHdfsFileStatus(file);
-      logAuditEvent(UserGroupInformation.getCurrentUser(), Server.getRemoteIp(), "rename", src, dst, stat);
+    if (file != null) {
+      if (auditLog.isInfoEnabled() && isExternalInvocation()) {
+        final HdfsFileStatus stat = StateManager.adfsFileToHdfsFileStatus(file);
+        logAuditEvent(UserGroupInformation.getCurrentUser(), Server.getRemoteIp(), "rename", src, dst, stat);
+      }
+      return true;
+    } else {
+      return false;
     }
-    return true;
   }
 
   private File renameToInternal(String src, String dst) throws IOException {
@@ -1339,14 +1354,23 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
 
     Integer lockid = getLock(src.getBytes(), true);
     try {
-      // create parent directory for dst
-      java.io.File javaFile = new java.io.File(dst);
-      String parentPath = javaFile.getParent();
-      File parentFile = stateManager.insertFileByPath(parentPath, 0, -1, (byte) 0, false, null);
+      if (targetFile == null) {
+        // create parent directory for dst
+        java.io.File javaFile = new java.io.File(dst);
+        String parentPath = javaFile.getParent();
+        File parentFile = stateManager.insertFileByPath(parentPath, 0, -1, (byte) 0, false, null);
 
-      // change parent directory
-      file.parentId = parentFile.id;
-      file.name = javaFile.getName();
+        // change parent directory
+        file.parentId = parentFile.id;
+        file.name = javaFile.getName();
+      } else {
+        if (targetFile.isDir()) {
+          // change parent directory
+          file.parentId = targetFile.id;
+        } else {
+          return null;
+        }
+      }
       return stateManager.updateFileByFile(file, File.PARENTID | File.NAME);
     } finally {
       if (lockid != null) {
@@ -1498,21 +1522,21 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
     BlockEntry lastBlockEntry = BlockEntry.getLastBlockEntry(blockEntryList);
     DatanodeDescriptor[] targets =
         stateManager.getDatanodeDescriptorArrayByBlockList(lastBlockEntry == null ? null : lastBlockEntry
-            .getBlockList(true));
+            .getBlockList(false));
 
     // Initialize lease recovery for pendingFile. If there are no blocks associated with this file,
     // then reap lease immediately. Otherwise renew the lease and trigger lease recovery.
     if (targets == null || targets.length == 0) {
       // delete blocks for test case: they are allocated and have not been received from data nodes
-      if (lastBlockEntry != null && lastBlockEntry.getLength() < 0) {
-        com.taobao.adfs.block.Block leftBlock =
-            new com.taobao.adfs.block.Block(lastBlockEntry.getBlockId(), -1, lastBlockEntry.getGenerationStamp(),
-                lastBlockEntry.getFileId(), Datanode.NULL_DATANODE_ID, lastBlockEntry.getFileIndex());
-        stateManager.insertBlockByBlock(leftBlock);
-        for (com.taobao.adfs.block.Block block : lastBlockEntry.getBlockList(false)) {
-          stateManager.deleteBlockByIdAndDatanodeId(block.id, block.datanodeId);
-        }
-      }
+      // if (lastBlockEntry != null && lastBlockEntry.getLength() < 0) {
+      // com.taobao.adfs.block.Block leftBlock =
+      // new com.taobao.adfs.block.Block(lastBlockEntry.getBlockId(), -1, lastBlockEntry.getGenerationStamp(),
+      // lastBlockEntry.getFileId(), Datanode.NULL_DATANODE_ID, lastBlockEntry.getFileIndex());
+      // stateManager.insertBlockByBlock(leftBlock);
+      // for (com.taobao.adfs.block.Block block : lastBlockEntry.getBlockList(false)) {
+      // stateManager.deleteBlockByIdAndDatanodeId(block.id, block.datanodeId);
+      // }
+      // }
       finalizeINodeFileUnderConstruction(file, blockEntryList);
       NameNode.stateChangeLog.warn("BLOCK* internalReleaseLease: No blocks found, commit " + file + " from " + holder);
       return;
@@ -1538,7 +1562,8 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
   private void finalizeINodeFileUnderConstruction(File file, List<BlockEntry> blockEntryList) throws IOException {
     file.length = BlockEntry.getTotalLength(blockEntryList);
     file.leaseHolder = null;
-    stateManager.updateFileByFile(file, File.LENGTH | File.LEASEHOLDER);
+    file.leaseRecoveryTime = 0;
+    stateManager.updateFileByFile(file, File.LENGTH | File.LEASEHOLDER | File.LEASERECOVERYTIME);
     NameNode.stateChangeLog.info("commit " + file);
     checkReplicationFactor(file, blockEntryList);
   }
@@ -1552,7 +1577,7 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
     if (isInSafeMode()) { throw new SafeModeException("Cannot commitBlockSynchronization " + lastblock, safeMode); }
     BlockEntry blockEntry = stateManager.getBlockEntryByBlockId(lastblock.getBlockId());
     if (blockEntry == null) throw new IOException("Block (=" + lastblock + ") not found");
-    File file = stateManager.findFileById(lastblock.getBlockId());
+    File file = stateManager.findFileById(blockEntry.getFileId());
     if (file == null) throw new IOException("file (=" + file + ") not found");
     if (!file.isUnderConstruction()) { throw new IOException("Unexpected block (=" + lastblock + ") since the file (="
         + file + ") is not under construction"); }
@@ -1566,8 +1591,8 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
         block.id = blockEntry.getBlockId();
         block.fileId = blockEntry.getFileId();
         block.fileIndex = blockEntry.getFileIndex();
-        block.length = blockEntry.getLength();
-        block.generationStamp = blockEntry.getGenerationStamp();
+        block.length = -1;
+        block.generationStamp = newgenerationstamp;
         // insert a flag block
         if (blockEntry.getBlock(Datanode.NULL_DATANODE_ID) == null) {
           block.datanodeId = Datanode.NULL_DATANODE_ID;
@@ -1586,8 +1611,7 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
             block.datanodeId = node.getId();
             stateManager.insertBlockByBlock(block);
             isNewBlockAdded = true;
-            LOG.info("commitBlockSynchronization(lastblock=" + lastblock + ", newtargets=" + newtargets
-                + ") successful");
+            LOG.info("commitBlockSynchronization(lastblock=" + lastblock + " for " + block.datanodeId + ") successful");
           } else {
             LOG.error("commitBlockSynchronization included a target DN " + newtargets[i]
                 + " which is not known to NN. Ignoring.");
@@ -1598,9 +1622,11 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
         }
       }
 
-      // remove lease and close file
-      List<BlockEntry> blockEntryList = stateManager.getBlockEntryListByFileId(file.id);
-      finalizeINodeFileUnderConstruction(file, blockEntryList);
+      if (closeFile) {
+        // remove lease and close file
+        List<BlockEntry> blockEntryList = stateManager.getBlockEntryListByFileId(file.id);
+        finalizeINodeFileUnderConstruction(file, blockEntryList);
+      }
 
       LOG.info("commitBlockSynchronization(newblock=" + lastblock + ", file=" + file + ", newgenerationstamp="
           + newgenerationstamp + ", newlength=" + newlength + ", newtargets=" + Arrays.asList(newtargets)
@@ -1794,6 +1820,19 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
 
     // check lease recovery
     cmd = nodeinfo.getLeaseRecoveryCommand(Integer.MAX_VALUE);
+    if (cmd != null) {
+      BlockCommand bcmd = (BlockCommand) cmd;
+      Block[] blocks = bcmd.getBlocks();
+      if (blocks != null) {
+        for (int i = 0; i < blocks.length; i++) {
+          if (blocks[i].getNumBytes() < 0) {
+            blocks[i].setNumBytes(0);
+          }
+        }
+      }
+      System.out.println("process lease recovery " + bcmd.getBlocks()[0].toString()
+          + bcmd.getTargets()[0][0].toString());
+    }
     if (cmd != null) return new DatanodeCommand[] { cmd };
 
     // add cmd for datanode
@@ -1830,7 +1869,7 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
             namenode.getClient().heartbeatCheck();
             lastHeartbeatCheck = now;
           }
-        } catch (Exception e) {
+        } catch (Throwable e) {
           FSNamesystem.LOG.error(StringUtils.stringifyException(e));
         }
         try {
@@ -2478,6 +2517,10 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
             // validate the reported block and its replication
             com.taobao.adfs.block.Block storedBlock = storedBlockEntry.getBlock(node.getId());
             if (reportedBlock.getGenerationStamp() < storedBlockEntry.getGenerationStamp()) {
+              if (NameNode.stateChangeLog.isDebugEnabled()) {
+                NameNode.stateChangeLog
+                    .debug("BLOCK* NameSystem.processReport: reportedBlock.getGenerationStamp < storedBlockEntry.getGenerationStamp");
+              }
               toInvalidate.add(new Block(reportedBlock, node.getId()));
               if (storedBlock != null) toRemove.add(new Block(storedBlock));
             } else if (reportedBlock.getGenerationStamp() > storedBlockEntry.getGenerationStamp()) {
@@ -2485,6 +2528,10 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
               toAdd.add(new Block(reportedBlock, node.getId()));
             } else if (reportedBlock.getGenerationStamp() == storedBlockEntry.getGenerationStamp()) {
               if (reportedBlock.getNumBytes() < storedBlockEntry.getLength()) {
+                if (NameNode.stateChangeLog.isDebugEnabled()) {
+                  NameNode.stateChangeLog
+                      .debug("BLOCK* NameSystem.processReport: reportedBlock.getNumBytes < storedBlockEntry.getLength");
+                }
                 toInvalidate.add(new Block(reportedBlock, node.getId()));
                 if (storedBlock != null) toRemove.add(new Block(storedBlock));
               } else if (reportedBlock.getNumBytes() > storedBlockEntry.getLength()) {
@@ -2559,7 +2606,7 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
           b.getDatanodeId() == node.getId() ? node : stateManager.getDatanodeDescriptorByDatanodeId(b.getDatanodeId());
       if (NameNode.stateChangeLog.isDebugEnabled())
         NameNode.stateChangeLog.debug("BLOCK* NameSystem.processReport: to add " + b + " on " + targetNode);
-      addStoredBlock(b, targetNode, null);
+      addStoredBlock(b, targetNode, null, true);
     }
     for (Block b : toInvalidate) {
       DatanodeDescriptor targetNode =
@@ -2577,7 +2624,8 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
    * @return the block that is stored in blockMap.
    * @throws IOException
    */
-  Block addStoredBlock(Block block, DatanodeDescriptor node, DatanodeDescriptor delNodeHint) throws IOException {
+  Block addStoredBlock(Block block, DatanodeDescriptor node, DatanodeDescriptor delNodeHint,
+      boolean isInvokedByBlockReport) throws IOException {
     // check block could be added
     BlockEntry storedBlockEntry = stateManager.getBlockEntryByBlockId(block.getBlockId());
     if (storedBlockEntry == null) { return rejectAddStoredBlock(block, node,
@@ -2634,18 +2682,20 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
           if (LOG.isDebugEnabled()) LOG.debug("FSNamesystem.addStoredBlock: ignore " + block + " from " + storedBlock);
         }
         // process corrupt block on other datanodes
-        for (com.taobao.adfs.block.Block storedBlockOnOtherDatanode : storedBlockEntry.getBlockList(false)) {
-          if (storedBlockOnOtherDatanode.datanodeId == storedBlock.datanodeId) continue;
-          boolean isExistingBlockCorrupt = false;
-          if (storedBlockOnOtherDatanode.generationStamp != storedBlock.generationStamp) {
-            isExistingBlockCorrupt = true;
-          } else if (storedBlockOnOtherDatanode.length != storedBlock.length && !blockIsUnderConstruction) {
-            isExistingBlockCorrupt = true;
-          }
-          if (isExistingBlockCorrupt) {
-            LOG.warn("Mark existing replica " + storedBlockOnOtherDatanode + " from "
-                + IpAddress.getIpAndPort(node.getId()) + " as corrupt: storedBlock=" + storedBlock);
-            markBlockAsCorrupt(block, node);
+        if (isInvokedByBlockReport) {
+          for (com.taobao.adfs.block.Block storedBlockOnOtherDatanode : storedBlockEntry.getBlockList(false)) {
+            if (storedBlockOnOtherDatanode.datanodeId == storedBlock.datanodeId) continue;
+            boolean isExistingBlockCorrupt = false;
+            if (storedBlockOnOtherDatanode.generationStamp != storedBlock.generationStamp) {
+              isExistingBlockCorrupt = true;
+            } else if (storedBlockOnOtherDatanode.length != storedBlock.length && !blockIsUnderConstruction) {
+              isExistingBlockCorrupt = true;
+            }
+            if (isExistingBlockCorrupt) {
+              LOG.warn("Mark existing replica " + storedBlockOnOtherDatanode + " from "
+                  + IpAddress.getIpAndPort(node.getId()) + " as corrupt: storedBlock=" + storedBlock);
+              markBlockAsCorrupt(block, node);
+            }
           }
         }
       }
@@ -2673,7 +2723,7 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
       int corruptReplicasCount = corruptReplicas.numCorruptReplicas(block);
       int numCorruptNodes = num.corruptReplicas();
       if (numCorruptNodes != corruptReplicasCount) {
-        LOG.warn("Inconsistent number of corrupt replicas for " + block + "blockMap has " + numCorruptNodes
+        LOG.warn("Inconsistent number of corrupt replicas for " + block + " blockMap has " + numCorruptNodes
             + " but corrupt replicas map has " + corruptReplicasCount);
       }
       if ((corruptReplicasCount > 0) && (numLiveReplicas >= file.replication)) invalidateCorruptReplicas(block);
@@ -2976,7 +3026,7 @@ public class FSNamesystem implements FSConstants, FSNamesystemMBean, NameNodeMXB
 
     // Modify the blocks->datanode map and node's map.
     pendingReplications.remove(block);
-    addStoredBlock(block, node, delHintNode);
+    addStoredBlock(block, node, delHintNode, false);
   }
 
   public long getMissingBlocksCount() {

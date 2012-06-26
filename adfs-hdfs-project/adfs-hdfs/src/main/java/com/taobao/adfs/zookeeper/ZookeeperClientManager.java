@@ -21,6 +21,7 @@ package com.taobao.adfs.zookeeper;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 
 import org.apache.zookeeper.WatchedEvent;
 import org.apache.zookeeper.Watcher;
@@ -35,7 +36,35 @@ import com.taobao.adfs.util.Utilities;
  */
 public class ZookeeperClientManager {
   public static final Logger logger = LoggerFactory.getLogger(ZookeeperClientManager.class);
+
   private Map<String, ZooKeeper> zookeeperRepository = new HashMap<String, ZooKeeper>();
+
+  public final CountDownLatch connectedSignal = new CountDownLatch(1);
+
+  private volatile boolean connected;
+
+  private Thread stateWatcherThread;
+
+  private int timeout = 90000;
+
+  private class StateWatcher implements Runnable {
+    long startNotConnected;
+
+    @Override
+    public void run() {
+      startNotConnected = System.currentTimeMillis();
+      int margin = timeout * 2;
+
+      while (!connected) {
+        if (startNotConnected + margin < System.currentTimeMillis()) { return; }
+        try {
+          Thread.sleep(5);
+        } catch (InterruptedException e) {
+          return;
+        }
+      }
+    }
+  }
 
   public synchronized ZooKeeper create(String connectString, int sessionTimeout) throws IOException {
     ZooKeeper zookeeper = zookeeperRepository.get(connectString);
@@ -43,15 +72,71 @@ public class ZookeeperClientManager {
       Utilities.logDebug(logger, "reuse zookeeper client, address=", connectString);
       return zookeeper;
     }
+    this.timeout = sessionTimeout;
 
     Watcher watcher = new Watcher() {
       public void process(WatchedEvent event) {
+        switch (event.getType()) {
+        case None: {
+          connectionEvent(event);
+          break;
+        }
+        }
       }
     };
     zookeeper = new ZooKeeper(connectString, sessionTimeout, watcher);
+    try {
+      connectedSignal.await();
+    } catch (InterruptedException e) {
+      Utilities.logDebug(logger, "notify by SynConnected.");
+    }
     zookeeperRepository.put(connectString, zookeeper);
     Utilities.logDebug(logger, "create zookeeper client, address=", connectString);
     return zookeeper;
+  }
+
+  /**
+   * 
+   * if Disconnected or Expired,reconnect ZooKeeper
+   * 
+   * @param event
+   * @throws KeeperException
+   * @throws IOException
+   * @throws InterruptedException
+   * @throws LeaderElectionSetupException
+   * @throws MetaCacheInitErrorException
+   * @throws SessionExpiredException
+   */
+  private void connectionEvent(WatchedEvent event) {
+    switch (event.getState()) {
+    case Disconnected:
+      logger.warn("Disconnected from ZooKeeper");
+      connected = false;
+      if (stateWatcherThread != null) {
+        stateWatcherThread.interrupt();
+      }
+      stateWatcherThread = new Thread(new StateWatcher(), "ZkStateWatcher");
+      stateWatcherThread.start();
+      break;
+    case Expired:
+      logger.info("ZooKeeper session expired, close current zookeeper's connect, and reconnect zk...");
+      connected = false;
+      reconnect("");
+      break;
+    case SyncConnected:
+      connected = true;
+      if (stateWatcherThread != null) {
+        stateWatcherThread.interrupt();
+        stateWatcherThread = null;
+      }
+      logger.info("had connect zk....");
+      connectedSignal.countDown();
+    }
+  }
+
+  public boolean reconnect(String root) {
+    // to do
+    return true;
   }
 
   public synchronized void close(String connectString) {

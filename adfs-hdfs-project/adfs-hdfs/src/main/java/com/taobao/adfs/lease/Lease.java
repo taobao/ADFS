@@ -12,7 +12,7 @@ import com.taobao.adfs.distributed.DistributedDataRepositoryBaseOnTable.Table;
 @Database(name = "nn_state")
 @Table()
 public class Lease extends DistributedDataRepositoryRow {
-  @Column(width = 64, nullable = false, binary = true, indexes = { @Index(name = "PRIMARY") })
+  @Column(width = 255, nullable = false, binary = true, indexes = { @Index(name = "PRIMARY") })
   public String holder = null;
   @Column(nullable = false, indexes = { @Index(name = "TIME") })
   public long time = 0;

@@ -307,7 +307,9 @@ abstract public class DistributedDataRepositoryBaseOnTable {
       row.setIdentifier();
       return updatePhysically(oldRow, row);
     } finally {
-      locker.unlock(null, row.getKey());
+      if (row != null) {
+        locker.unlock(null, row.getKey());
+      }
     }
   }
 
@@ -321,7 +323,9 @@ abstract public class DistributedDataRepositoryBaseOnTable {
       row.setVersion(-distributedData.version.increaseAndGet());
       return deletePhysically(row);
     } finally {
-      locker.unlock(null, row.getKey());
+      if (row != null) {
+        locker.unlock(null, row.getKey());
+      }
     }
   }
 

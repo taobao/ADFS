@@ -29,8 +29,8 @@ import java.util.Map;
 import java.util.concurrent.ArrayBlockingQueue;
 
 /**
- * @author <a href="mailto:wentong@taobao.com">文通</a>
- * @since 11-10-31 下午1:38
+ * @author <a href="mailto:wentong@taobao.com"></a>
+ * 
  */
 public class TDHSClientHandler extends SimpleChannelUpstreamHandler {
 
@@ -49,8 +49,8 @@ public class TDHSClientHandler extends SimpleChannelUpstreamHandler {
         this.tdhsNetForNetty = tdhsNetForNetty;
     }
 
-    @Override public void channelConnected(ChannelHandlerContext ctx, ChannelStateEvent e) throws Exception {
-        //握手需要被连接池的写锁保护起来
+    @Override 
+    public void channelConnected(ChannelHandlerContext ctx, ChannelStateEvent e) throws Exception {
         this.tdhsNetForNetty.addConnectedConnectionToPool(e.getChannel(), new ConnectionPool.Handler<Channel>() {
             public void execute(Channel channel) {
                 channel.write(shakeHandeMessage);

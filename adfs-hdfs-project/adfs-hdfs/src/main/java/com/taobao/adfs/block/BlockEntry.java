@@ -59,7 +59,7 @@ public class BlockEntry implements Comparable<BlockEntry> {
     this.generationStamp = primaryBlock.generationStamp;
     this.fileId = primaryBlock.fileId;
     this.fileIndex = primaryBlock.fileIndex;
-    hdfsBlock = new org.apache.hadoop.hdfs.protocol.Block(blockId, length, generationStamp);
+    hdfsBlock = new org.apache.hadoop.hdfs.protocol.Block(blockId, length >= 0 ? length : 0, generationStamp);
   }
 
   public org.apache.hadoop.hdfs.protocol.Block getHdfsBlock() {
@@ -108,7 +108,8 @@ public class BlockEntry implements Comparable<BlockEntry> {
         ", generationStamp=").append(generationStamp).append(", fileId=").append(fileId).append(", fileIndex=").append(
         fileIndex).append(", datanodeIds={");
     for (int i = 0; i < blockList.size(); ++i) {
-      builder.append(blockList.get(i).datanodeId);
+      Block block = blockList.get(i);
+      builder.append(block.datanodeId).append('(').append(block.length).append(')');
       if (i < blockList.size() - 1) builder.append(',');
     }
     builder.append("}]");

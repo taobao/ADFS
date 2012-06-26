@@ -233,20 +233,20 @@ public class RPC {
       return method;
     }
 
-    public Object invoke() throws IOException {
+    public Object invoke() throws Throwable {
       if (object == null) throw new IOException("object is null");
       return invoke(object);
     }
 
-    public Object invoke(Object object) throws IOException {
+    public Object invoke(Object object) throws Throwable {
       long startTime = System.currentTimeMillis();
       try {
         result = getMethod().invoke(object, parameters);
         haveInvoked = true;
         byteArray = null;
         return result;
-      } catch (Throwable t) {
-        throw new IOException(t);
+      } catch (InvocationTargetException e) {
+        throw e.getTargetException();
       } finally {
         elapsedTime = System.currentTimeMillis() - startTime;
       }

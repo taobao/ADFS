@@ -186,10 +186,12 @@ public class AppendTestUtil {
         out = fs.append(file1);
         LOG.info("Successfully opened for appends");
         recovered = true;
-      } catch (IOException e) {
-        if (!e.getMessage().contains("being recovered") &&
-            !e.getMessage().contains("being created")) {
-          throw e;
+      } catch (Exception e) {
+        if (e.getMessage().contains("Unable to retrieve blocks locations")) {
+          //to do sleep
+        } else {
+          if (!e.getMessage().contains("being recovered") && !e.getMessage().contains("being created")) { throw new IOException(
+              e); }
         }
         LOG.info("Failed open for append, waiting on lease recovery");
         try {

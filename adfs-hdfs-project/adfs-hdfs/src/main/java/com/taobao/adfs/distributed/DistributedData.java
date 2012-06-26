@@ -226,7 +226,7 @@ public abstract class DistributedData implements Writable {
   }
 
   synchronized public DistributedData getData(DistributedData oldData,
-      ReentrantReadWriteLockExtension.WriteLock writeLock) throws IOException {
+      ReentrantReadWriteLockExtension.WriteLock writeLock) throws Throwable {
     DistributedData newData = null;
     if (oldData.getIsIncrementRestoreEnabled()) newData = getDataIncrement(oldData, writeLock);
     else newData = getDataAll(oldData, writeLock);
@@ -234,7 +234,7 @@ public abstract class DistributedData implements Writable {
   }
 
   public DistributedData getDataAll(DistributedData oldData, ReentrantReadWriteLockExtension.WriteLock writeLock)
-      throws IOException {
+      throws Throwable {
     throw new IOException("need to implement this function in your data");
   }
 
@@ -243,20 +243,20 @@ public abstract class DistributedData implements Writable {
     throw new IOException("need to implement this function in your data");
   }
 
-  public void setData(DistributedData newData) throws IOException {
+  public void setData(DistributedData newData) throws Throwable {
     if (getIsIncrementRestoreEnabled()) setDataIncrement(newData);
     else setDataAll(newData);
   }
 
-  public void setDataAll(DistributedData newData) throws IOException {
+  public void setDataAll(DistributedData newData) throws Throwable {
     throw new IOException("need to implement this function in your data");
   }
 
-  public void setDataIncrement(DistributedData newData) throws IOException {
+  public void setDataIncrement(DistributedData newData) throws Throwable {
     throw new IOException("need to implement this function in your data");
   }
 
-  public Object invoke(Invocation invocation) throws IOException {
+  public Object invoke(Invocation invocation) throws Throwable {
     if (invocation.getDistributedOperations() == null) return invocation.invoke(this);
     else {
       long startTime = System.currentTimeMillis();
@@ -269,7 +269,7 @@ public abstract class DistributedData implements Writable {
     }
   }
 
-  public Object invokeDirectly(Invocation invocation) throws IOException {
+  public Object invokeDirectly(Invocation invocation) throws Throwable {
     invocation.setProxyMethodName(null);
     return invocation.invoke(this);
   }

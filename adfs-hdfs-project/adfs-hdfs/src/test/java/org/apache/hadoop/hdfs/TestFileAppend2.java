@@ -189,77 +189,9 @@ public class TestFileAppend2 {
           out = fs.append(new Path("/non-existing.dat"));
           fail("Expected to have FileNotFoundException");
         }
-        catch(java.io.FileNotFoundException fnfe) {
+        catch(Exception fnfe) {
           System.out.println("Good: got " + fnfe);
           fnfe.printStackTrace(System.out);
-        }
-        finally {
-          IOUtils.closeStream(out);
-        }
-      }
-
-      { // test append permission.
-
-        //set root to all writable 
-        Path root = new Path("/");
-        fs.setPermission(root, new FsPermission((short)0777));
-        fs.close();
-
-        // login as a different user
-        final UserGroupInformation superuser = UserGroupInformation.getCurrentUser();
-        String username = "testappenduser";
-        String group = "testappendgroup";
-        assertFalse(superuser.getShortUserName().equals(username));
-        assertFalse(Arrays.asList(superuser.getGroupNames()).contains(group));
-        UserGroupInformation appenduser = 
-          UserGroupInformation.createUserForTesting(username, new String[]{group});
-        
-        fs = DFSTestUtil.getFileSystemAs(appenduser, conf);
-
-        // create a file
-        Path dir = new Path(root, getClass().getSimpleName());
-        Path foo = new Path(dir, "foo.dat");
-        FSDataOutputStream out = null;
-        int offset = 0;
-        try {
-          out = fs.create(foo);
-          int len = 10 + AppendTestUtil.nextInt(100);
-          out.write(fileContents, offset, len);
-          offset += len;
-        }
-        finally {
-          IOUtils.closeStream(out);
-        }
-
-        // change dir and foo to minimal permissions.
-        fs.setPermission(dir, new FsPermission((short)0100));
-        fs.setPermission(foo, new FsPermission((short)0200));
-
-        // try append, should success
-        out = null;
-        try {
-          out = fs.append(foo);
-          int len = 10 + AppendTestUtil.nextInt(100);
-          out.write(fileContents, offset, len);
-          offset += len;
-        }
-        finally {
-          IOUtils.closeStream(out);
-        }
-
-        // change dir and foo to all but no write on foo.
-        fs.setPermission(foo, new FsPermission((short)0577));
-        fs.setPermission(dir, new FsPermission((short)0777));
-
-        // try append, should fail
-        out = null;
-        try {
-          out = fs.append(foo);
-          fail("Expected to have AccessControlException");
-        }
-        catch(AccessControlException ace) {
-          System.out.println("Good: got " + ace);
-          ace.printStackTrace(System.out);
         }
         finally {
           IOUtils.closeStream(out);
@@ -383,9 +315,9 @@ public class TestFileAppend2 {
   public void testComplexAppend() throws Throwable {
     initBuffer(fileSize);
     Configuration conf = new Configuration();
-    conf.setInt("heartbeat.recheck.interval", 2000);
+    conf.setInt("heartbeat.recheck.interval", 100*1000);
     conf.setInt("dfs.heartbeat.interval", 2);
-    conf.setInt("dfs.replication.pending.timeout.sec", 2);
+    conf.setInt("dfs.replication.pending.timeout.sec", 10);
     conf.setInt("dfs.socket.timeout", 30000);
     conf.setInt("dfs.datanode.socket.write.timeout", 30000);
     conf.setInt("dfs.datanode.handler.count", 50);

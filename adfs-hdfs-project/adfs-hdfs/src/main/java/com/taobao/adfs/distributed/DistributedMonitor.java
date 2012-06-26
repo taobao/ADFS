@@ -77,19 +77,19 @@ public class DistributedMonitor {
     return false;
   }
 
-  public Class<?>[] getDataProtocols() throws IOException {
+  public Class<?>[] getDataProtocols() throws Throwable {
     return (Class<?>[]) remoteFieldMethod("data", "getDataProtocols");
   }
 
-  public ServerType getServerType() throws IOException {
+  public ServerType getServerType() throws Throwable {
     return (ServerType) getRemoteField("serverType");
   }
 
-  public int getServerPid() throws IOException {
+  public int getServerPid() throws Throwable {
     return (Integer) remoteMethod("getServerPid");
   }
 
-  public Long getLeaseTimeout() throws IOException {
+  public Long getLeaseTimeout() throws Throwable {
     return (Long) remoteMethod("getLeaseTimeout");
   }
 
@@ -126,55 +126,55 @@ public class DistributedMonitor {
     distributedManager.unregister(getServerName());
   }
 
-  public String getLoggerLevel(String loggerName) throws IOException {
+  public String getLoggerLevel(String loggerName) throws Throwable {
     return (String) remoteMethod("getLoggerLevel", loggerName);
   }
 
-  public String[] getLoggerInfos() throws IOException {
+  public String[] getLoggerInfos() throws Throwable {
     return (String[]) remoteMethod("getLoggerInfos");
   }
 
-  public String setLoggerLevel(String loggerName, String level) throws IOException {
+  public String setLoggerLevel(String loggerName, String level) throws Throwable {
     return (String) remoteMethod("setLoggerLevel", loggerName, level);
   }
 
-  public String[] getConfSettings() throws IOException {
+  public String[] getConfSettings() throws Throwable {
     return (String[]) remoteMethod("getConfSettings");
   }
 
-  public String getConf(String key) throws IOException {
+  public String getConf(String key) throws Throwable {
     return (String) remoteFieldMethod("conf", "get", key);
   }
 
-  public void setConf(String key, String value) throws IOException {
+  public void setConf(String key, String value) throws Throwable {
     remoteFieldMethod("conf", "set", key, value);
   }
 
-  public long getDataVersion() throws IOException {
+  public long getDataVersion() throws Throwable {
     return (Long) remoteFieldMethod("data", "getDataVersion");
   }
 
-  public String getDataLocker() throws IOException {
+  public String getDataLocker() throws Throwable {
     return remoteFieldMethod("data", "getDataLocker").toString();
   }
 
-  public String getDataRepositoryLockers() throws IOException {
+  public String getDataRepositoryLockers() throws Throwable {
     return Utilities.deepToString(remoteFieldMethod("data", "getDataRepositoryLockers"));
   }
 
-  public Object getRemoteField(String fieldName) throws IOException {
+  public Object getRemoteField(String fieldName) throws Throwable {
     return remoteMethod("getFieldValue", fieldName);
   }
 
-  public void setRemoteField(String fieldName, Object value) throws IOException {
+  public void setRemoteField(String fieldName, Object value) throws Throwable {
     remoteMethod("setFieldValue", 1, fieldName, value);
   }
 
-  public Object remoteMethod(String methodName, Object... parameters) throws IOException {
+  public Object remoteMethod(String methodName, Object... parameters) throws Throwable {
     return remoteMethod(methodName, -1, parameters);
   }
 
-  public Object remoteMethod(String methodName, Integer realTypeIndication, Object... parameters) throws IOException {
+  public Object remoteMethod(String methodName, Integer realTypeIndication, Object... parameters) throws Throwable {
     String serverName = conf.get("distributed.server.name");
     serverName = serverName.replaceFirst("0.0.0.0", "localhost");
     DistributedInvocable serverProxy = createServerProxy(serverName, conf);
@@ -194,15 +194,15 @@ public class DistributedMonitor {
     }
   }
 
-  public Object remoteFieldMethod(String fieldName, String methodName, Object... parameters) throws IOException {
+  public Object remoteFieldMethod(String fieldName, String methodName, Object... parameters) throws Throwable {
     return remoteMethod("invoke", fieldName, methodName, parameters);
   }
 
-  public Object remoteFieldField(String fieldName, String subFieldName) throws IOException {
+  public Object remoteFieldField(String fieldName, String subFieldName) throws Throwable {
     return remoteMethod("invoke", fieldName, subFieldName);
   }
 
-  public String remoteFieldTypeName(String fieldName) throws IOException {
+  public String remoteFieldTypeName(String fieldName) throws Throwable {
     return (String) remoteMethod("getFieldTypeName", fieldName);
   }
 }

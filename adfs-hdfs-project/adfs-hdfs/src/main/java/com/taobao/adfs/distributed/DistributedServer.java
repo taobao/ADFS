@@ -45,8 +45,8 @@ import com.taobao.adfs.distributed.DistributedManager.ServerStatuses;
 import com.taobao.adfs.distributed.editlogger.DistributedEditLogger;
 import com.taobao.adfs.distributed.metrics.DistributedMetrics;
 import com.taobao.adfs.distributed.rpc.RPC;
-import com.taobao.adfs.distributed.rpc.RPC.Invocation;
 import com.taobao.adfs.distributed.rpc.Server;
+import com.taobao.adfs.distributed.rpc.RPC.Invocation;
 import com.taobao.adfs.util.IpAddress;
 import com.taobao.adfs.util.ReentrantReadWriteLockExtension;
 import com.taobao.adfs.util.Utilities;
@@ -120,7 +120,7 @@ public class DistributedServer implements DistributedInvocable {
     return serverName;
   }
 
-  public static void configLogger(Configuration conf) throws IOException {
+  public static void configLogger(Configuration conf) throws Throwable {
     String loggerConfKeyPrefix = "distributed.logger.conf.";
     Utilities.setConfDefaultValue(conf, loggerConfKeyPrefix + "log4j.rootLogger", "INFO,DistributedServer");
     Utilities.setConfDefaultValue(conf, loggerConfKeyPrefix + "log4j.threshhold", "ALL");
@@ -626,7 +626,7 @@ public class DistributedServer implements DistributedInvocable {
     }
   }
 
-  DistributedData getDataFromMaster(ServerStatus master) throws IOException {
+  DistributedData getDataFromMaster(ServerStatus master) throws Throwable {
     Long versionFrom = (Long) data.getElementToTransfer("distributed.data.restore.increment.version.from");
     Long versionTo = (Long) data.getElementToTransfer("distributed.data.restore.increment.version.to");
     if (versionFrom != null && versionTo != null) log(Level.INFO, " start to get data of master=", master.name,
@@ -674,7 +674,7 @@ public class DistributedServer implements DistributedInvocable {
     }
   }
 
-  void restoreIncrementFromMasterServerInternal(ServerStatus master, boolean firstCycle) throws IOException {
+  void restoreIncrementFromMasterServerInternal(ServerStatus master, boolean firstCycle) throws Throwable {
     // check version gap
     long incrementVersionGapMax = conf.getLong("distributed.data.restore.increment.version.gap.max", -1);
     if (incrementVersionGapMax > Integer.MAX_VALUE) {
@@ -819,7 +819,7 @@ public class DistributedServer implements DistributedInvocable {
   // }
   // }
 
-  public static void stopServer(Configuration conf) throws IOException {
+  public static void stopServer(Configuration conf) throws Throwable {
     conf = new Configuration(conf);
     String serverName = getServerName(conf);
     conf.set("distributed.server.name", serverName);
@@ -921,7 +921,7 @@ public class DistributedServer implements DistributedInvocable {
     }
   }
 
-  public Object dataInvokeInternal(Invocation dataInvocation) throws IOException {
+  public Object dataInvokeInternal(Invocation dataInvocation) throws Throwable {
     ServerType serverTypeSnapshot = null;
     List<ServerStatus> bakupServersSnapshot = null;
     synchronized (statusLock) {
@@ -941,7 +941,7 @@ public class DistributedServer implements DistributedInvocable {
         return dataInvocation.getResult();
       } catch (Throwable t) {
         dataInvocation.setResult(t);
-        throw new IOException(t);
+        throw t;
       } finally {
         log(Level.DEBUG, " do write call ", dataInvocation);
         writeBackupServers(dataInvocation, bakupServersSnapshot);
@@ -990,7 +990,7 @@ public class DistributedServer implements DistributedInvocable {
         }
       }
     } finally {
-      data.getOperationQueue().deleteAndUnlockOperations(threadId);
+      data.getOperationQueue().deleteAndUnlockOperations(operations);
     }
   }
 
@@ -998,7 +998,7 @@ public class DistributedServer implements DistributedInvocable {
     return conf.getLong("distributed.lease.timeout", 1000);
   }
 
-  public Object dataInvoke(Invocation invocation) throws IOException {
+  public Object dataInvoke(Invocation invocation) throws Throwable {
     try {
       // wait until editLogger has applied all edit logs for master
       if (serverType.is(ServerType.MASTER)) editLogger.waitUntilWorkSizeIsEmpty();
@@ -1025,7 +1025,7 @@ public class DistributedServer implements DistributedInvocable {
           throw new DistributedException(true, new IOException("master has changed, new type is " + serverType));
         }
       }
-      throw new IOException(t);
+      throw t;
     } finally {
       getDataLocker.readLock().unlock();
     }
@@ -1059,7 +1059,7 @@ public class DistributedServer implements DistributedInvocable {
     return Utilities.setLoggerLevel(loggerName, level, logger);
   }
 
-  public String[] getConfSettings() throws IOException {
+  public String[] getConfSettings() throws Throwable {
     Map<String, String> confMap = Utilities.getConf(conf, null);
     String[] confKeysToFollow = conf.getStrings("distributed.conf.follow.range", "distributed.metrics.");
     List<String> confsToFollow = new ArrayList<String>();
@@ -1114,7 +1114,7 @@ public class DistributedServer implements DistributedInvocable {
   /**
    * call public/protected/private/default method of this server
    */
-  public Object invoke(Invocation invocation) throws IOException {
+  public Object invoke(Invocation invocation) throws Throwable {
     long startTime = System.currentTimeMillis();
     try {
       threadLocalInvocation.set(invocation);
@@ -1163,7 +1163,7 @@ public class DistributedServer implements DistributedInvocable {
   /**
    * call method of field with name of fieldName
    */
-  public Object invoke(String fieldName, String methodName, Object[] args) throws IOException {
+  public Object invoke(String fieldName, String methodName, Object[] args) throws Throwable {
     return new Invocation(getFieldValue(fieldName), methodName, args).invoke();
   }
 

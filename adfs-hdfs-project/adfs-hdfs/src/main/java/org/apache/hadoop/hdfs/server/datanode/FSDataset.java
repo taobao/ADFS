@@ -1823,7 +1823,7 @@ public class FSDataset implements FSConstants, FSDatasetInterface {
       Map<Block, File> seenOnDisk,
       Map<Block, DatanodeBlockInfo> volumeMap,
       Map<Block,ActiveFile> ongoingCreates) {
-    
+    DataNode.LOG.info("block's size seen on disk is: " + seenOnDisk.size());
     int numDeletedAfterScan = 0;
     int numAddedAfterScan = 0;
     int numOngoingIgnored = 0;

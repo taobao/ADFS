@@ -48,7 +48,7 @@ public class MysqlServerControllerTest {
    * need to install mysql, xtrabackup and innobackupex in $PATH
    */
   @Test
-  public void testFormatAndGetAndSetData() throws IOException {
+  public void testFormatAndGetAndSetData() throws Throwable {
     String osType = Utilities.getOsType();
     if (osType.isEmpty()) System.out.println("WARN: unsupported operation system");
 

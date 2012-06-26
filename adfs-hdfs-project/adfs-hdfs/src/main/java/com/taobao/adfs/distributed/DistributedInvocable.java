@@ -18,8 +18,6 @@
 
 package com.taobao.adfs.distributed;
 
-import java.io.IOException;
-
 import com.taobao.adfs.distributed.rpc.VersionedProtocol;
 import com.taobao.adfs.distributed.rpc.RPC.Invocation;
 
@@ -32,5 +30,5 @@ public interface DistributedInvocable extends VersionedProtocol {
   /**
    * call public/protected/private/default method of this server
    */
-  Object invoke(Invocation invocation) throws IOException;
+  Object invoke(Invocation invocation) throws Throwable;
 }

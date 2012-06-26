@@ -28,6 +28,7 @@ function print_usage(){
   echo "       where COMMAND is one of:"
   echo "  fs                   run a generic filesystem user client"
   echo "  ds                   run a distributed shell"
+  echo "  benchmark            run a distributed shell"
   echo "  version              print the version"
   echo "  jar <jar>            run a jar file"
   echo "  distcp <srcurl> <desturl> copy file or directories recursively"
@@ -80,6 +81,9 @@ case $COMMAND in
       HADOOP_OPTS="$HADOOP_OPTS $HADOOP_CLIENT_OPTS"
     elif [ "$COMMAND" = "ds" ] ; then
       CLASS=com.taobao.adfs.distributed.DistributedShell
+      HADOOP_OPTS="-Dconf.prefix=hdfs $HADOOP_OPTS $HADOOP_CLIENT_OPTS"
+    elif [ "$COMMAND" = "benchmark" ] ; then
+      CLASS=com.taobao.adfs.benchmark.BenchmarkerForNamenode
       HADOOP_OPTS="$HADOOP_OPTS $HADOOP_CLIENT_OPTS"
     elif [ "$COMMAND" = "version" ] ; then
       CLASS=org.apache.hadoop.util.VersionInfo

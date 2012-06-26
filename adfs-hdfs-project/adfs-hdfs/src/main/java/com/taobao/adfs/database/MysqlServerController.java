@@ -39,7 +39,7 @@ public class MysqlServerController {
   /**
    * need to avoid timeout of sub-process. note: innobackupex has been modified by jiwan@taobao.com
    */
-  public String getData(Configuration conf, Lock writeLock) throws IOException {
+  public String getData(Configuration conf, Lock writeLock) throws Throwable {
     // get settings
     setMysqlDefaultConf(conf);
     String dataPathLocal = Utilities.getNormalPath(conf.get("mysql.server.data.path", "."));
@@ -108,8 +108,6 @@ public class MysqlServerController {
           break;
         }
       }
-    } catch (IOException e) {
-      throw e;
     } finally {
       if (stdInputWriter != null) stdInputWriter.close();
       if (stdErrorReader != null) stdErrorReader.close();
@@ -138,8 +136,9 @@ public class MysqlServerController {
 
   /**
    * need to avoid timeout of sub-process. note: innobackupex has been modified by jiwan@taobao.com
+   * @throws Throwable 
    */
-  public String setData(Configuration conf) throws IOException {
+  public String setData(Configuration conf) throws Throwable {
     // get settings
     saveMysqlConf(conf);
     String dataPathLocal = Utilities.getNormalPath(conf.get("mysql.server.data.path", "."));
@@ -179,8 +178,6 @@ public class MysqlServerController {
           break;
         }
       }
-    } catch (IOException e) {
-      throw e;
     } finally {
       if (stdInputWriter != null) stdInputWriter.close();
       if (stdErrorReader != null) stdErrorReader.close();
@@ -239,7 +236,7 @@ public class MysqlServerController {
     return mysqlLibPath;
   }
 
-  public void formatData(Configuration conf) throws IOException {
+  public void formatData(Configuration conf) throws Throwable {
     Utilities.logInfo(logger, "mysql server is formatting");
     setMysqlDefaultConf(conf);
     // stop mysql server and initialize data
@@ -307,7 +304,7 @@ public class MysqlServerController {
   /**
    * @return mysql server pid
    */
-  public String startServer(Configuration conf) throws IOException {
+  public String startServer(Configuration conf) throws Throwable {
     // start mysql server
     setMysqlDefaultConf(conf);
     String mysqlConfPath = Utilities.getNormalPath(conf.get("mysql.server.data.path", ".")) + "/my.cnf";
@@ -329,7 +326,7 @@ public class MysqlServerController {
     throw new IOException("fail to start mysql with command=" + commandForStartMysqld);
   }
 
-  public void saveMysqlConf(Configuration conf) throws IOException {
+  public void saveMysqlConf(Configuration conf) throws Throwable {
     setMysqlDefaultConf(conf);
 
     // get mysql configuration

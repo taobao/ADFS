@@ -38,7 +38,7 @@ import com.taobao.adfs.util.Utilities;
  */
 public class DistributedLockerTest {
   @BeforeClass
-  public static void setupBeforeClass() throws Exception {
+  public static void setupBeforeClass() throws Throwable {
     Utilities.configureLog4j(null, "distributed.logger.conf.", Level.DEBUG);
   }
 

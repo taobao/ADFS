@@ -25,24 +25,22 @@ public class DistributedOperationQueueTest {
         opList = queue.lockAndGetOperations(Thread.currentThread().getId());
         assertTrue("opList.length == " + opList.length, opList.length == 10);
         System.out.println(Arrays.toString(opList));
-        queue.deleteAndUnlockOperations(Thread.currentThread().getId());
+        queue.deleteAndUnlockOperations(opList);
       }
 
     }
   }
 
   @Test
-  public void testPutAndGetWithMultiThread() {
-    for(int i = 0; i < 2; i++ ){
-      Thread t = new PutAndGetter(queue);
-      t.setName("thread"+i);
-      t.start();
-      try {
-        t.join();
-      } catch (InterruptedException e) {
-        // TODO Auto-generated catch block
-        e.printStackTrace();
-      }
+  public void testPutAndGetWithMultiThread() throws InterruptedException {
+    Thread[] threads = new Thread[20];
+    for(int i = 0; i < threads.length; i++ ){
+      threads[i] = new PutAndGetter(queue);
+      threads[i].setName("thread"+i);
+      threads[i].start();
+    }
+    for(int i = 0; i < threads.length; i++ ){
+      threads[i].join();
     }
   }
   
@@ -137,7 +135,7 @@ public class DistributedOperationQueueTest {
     public void run() {
       DistributedOperation op;
       DistributedOperation[] opList;
-      for (int i = 0; i < 10000000; i++) {
+      for (int i = 0; i < 200000; i++) {
         op = generateOpration();
         queue.add(op);
         if ((i + 1) % 10 == 0) {
@@ -150,7 +148,7 @@ public class DistributedOperationQueueTest {
 //          }
           opList = queue.lockAndGetOperations(Thread.currentThread().getId());
 //          System.out.println("array length:" + opList.length + " " + Arrays.toString(opList));
-          queue.deleteAndUnlockOperations(Thread.currentThread().getId());
+          queue.deleteAndUnlockOperations(opList);
         }
       }
     }
@@ -170,7 +168,7 @@ public class DistributedOperationQueueTest {
       else if(getName().equals("t2"))
         assertTrue("operations.length ==" + operations.length, operations.length == 5);
       System.out.println("threadId" + getId() + "threadName:" + getName() + Arrays.toString(operations));
-      queue.deleteAndUnlockOperations(getId());
+      queue.deleteAndUnlockOperations(operations);
     }
   }
   
@@ -185,10 +183,11 @@ public class DistributedOperationQueueTest {
     private CountDownLatch notifier;
     private CountDownLatch interrupter;
     private DistributedOperationQueue queue;
+    DistributedOperation[] operations;
     public void run(){
       try {
         if(getName().equals("t0")){
-          DistributedOperation[] operations = queue.lockAndGetOperations(getId());
+          operations = queue.lockAndGetOperations(getId());
           System.out.println("threadId" + getId() + "threadName:" + getName() + Arrays.toString(operations));
           notifier.countDown();
           System.out.println(getName() + " is interrupted");
@@ -198,7 +197,7 @@ public class DistributedOperationQueueTest {
         else  {
           notifier.await();
           System.out.println(getName() + " is getting lock");
-          DistributedOperation[] operations = queue.lockAndGetOperations(getId());
+          operations = queue.lockAndGetOperations(getId());
           System.out.println("threadId" + getId() + "threadName:" + getName() + Arrays.toString(operations));
           System.out.println(getName() + " is interrupted");
           fire.await();
@@ -209,11 +208,11 @@ public class DistributedOperationQueueTest {
         e.printStackTrace();
       }
 
-      queue.deleteAndUnlockOperations(getId());
+      queue.deleteAndUnlockOperations(operations);
     }
   }
   public static DistributedOperation generateOpration() {
-    ExampleData.OperandExample f = new ExampleData.OperandExample("content");
+    ExampleData.OperandExample f = new ExampleData.OperandExample("content"+r.nextInt());
     DistributedOperation op =
       new DistributedOperation(DistributedOperation.DistributedOperator.values()[r.nextInt(3)], f);
     return op;

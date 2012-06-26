@@ -78,13 +78,11 @@ public class DistributedManager {
       if (name.contains(".")) name = name.split("\\.")[name.split("\\.").length - 1];
       return name;
     }
-    if (conf.getBoolean("distributed.client.enabled", true)) {
-      List<String> nameList = getNameList();
-      if (!nameList.isEmpty()) {
-        name = nameList.get(0);
-        log(Level.WARN, " randomly choose name=", name, " in ", Utilities.deepToString(nameList));
-        return name;
-      }
+    List<String> nameList = getNameList();
+    if (!nameList.isEmpty()) {
+      name = nameList.get(0);
+      log(Level.WARN, " randomly choose name=", name, " in ", Utilities.deepToString(nameList));
+      return name;
     }
     throw new IOException("need to specify distributed.manager.name or start one distributed server at least");
   }

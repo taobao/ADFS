@@ -22,7 +22,6 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.lang.reflect.Array;
 import java.lang.reflect.Field;
-import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
@@ -53,9 +52,7 @@ import com.taobao.adfs.util.Utilities;
 public class DistributedShell {
   public static final Logger logger = LoggerFactory.getLogger(DistributedShell.class);
 
-  public static void main(String[] args) throws IOException, IllegalArgumentException, IllegalAccessException,
-      InvocationTargetException, SecurityException, InstantiationException, NoSuchMethodException,
-      ClassNotFoundException {
+  public static void main(String[] args) throws Throwable {
     DistributedShell distrbutedShell = new DistributedShell(args);
     if (!distrbutedShell.execute()) distrbutedShell.printHelp();
     distrbutedShell.close();
@@ -65,15 +62,13 @@ public class DistributedShell {
   Configuration conf = null;
   Closeable dataClient = null;
 
-  DistributedShell(String[] args) throws IOException, IllegalArgumentException, SecurityException,
-      ClassNotFoundException, InstantiationException, IllegalAccessException, InvocationTargetException,
-      NoSuchMethodException {
+  DistributedShell(String[] args) throws Throwable {
     this.args = Utilities.parseVmArgs(args, null);
-    conf = Utilities.loadConfiguration("distributed-server");
+    conf = Utilities.loadConfiguration("");
     configLogger(conf);
   }
 
-  void configLogger(Configuration conf) throws IOException {
+  void configLogger(Configuration conf) throws Throwable {
     Utilities.configureLog4j(conf, "distributed.logger.conf.", Level.DEBUG);
     Utilities.setLoggerLevel(ZooKeeper.class.getName(), Level.ERROR.toString(), null);
     Utilities.setLoggerLevel(ClientCnxn.class.getName(), Level.ERROR.toString(), null);
@@ -87,8 +82,7 @@ public class DistributedShell {
     Utilities.setLoggerLevel(conf, null);
   }
 
-  boolean execute() throws IllegalArgumentException, SecurityException, InstantiationException, IllegalAccessException,
-      InvocationTargetException, NoSuchMethodException, IOException {
+  boolean execute() throws Throwable {
     if (shellForStopServers(args)) return true;
     if (shellForGetServers(args)) return true;
     if (shellForMonitor(args)) return true;
@@ -126,8 +120,7 @@ public class DistributedShell {
     return dataClient;
   }
 
-  boolean shellForClient(String[] args) throws IllegalArgumentException, SecurityException, InstantiationException,
-      IllegalAccessException, InvocationTargetException, NoSuchMethodException, IOException {
+  boolean shellForClient(String[] args) throws Throwable {
     if (args.length == 0 || getDataClient() == null) return false;
     String[] argsForMethod = (String[]) getSubArray(args, 1, args.length - 1);
     String methodName = args[0];
@@ -136,8 +129,7 @@ public class DistributedShell {
     return conf.getBoolean("distributed.shell.invoke.method.is.called", false);
   }
 
-  boolean shellForMonitor(String[] args) throws IllegalArgumentException, IllegalAccessException,
-      InvocationTargetException, IOException, SecurityException, InstantiationException, NoSuchMethodException {
+  boolean shellForMonitor(String[] args) throws Throwable {
     if (args.length < 2) return false;
     DistributedMonitor distributedMonitor = new DistributedMonitor(conf, args[0]);
     String[] argsForMethod = (String[]) getSubArray(args, 2, args.length - 2);
@@ -153,8 +145,7 @@ public class DistributedShell {
     return subArray;
   }
 
-  Object invokeMethod(Object object, String name, String[] parameterPairs, boolean allowDefault) throws IOException,
-      IllegalArgumentException, IllegalAccessException, InvocationTargetException {
+  Object invokeMethod(Object object, String name, String[] parameterPairs, boolean allowDefault) throws Throwable {
     // find method
     conf.setBoolean("distributed.shell.invoke.method.is.called", false);
     Method[] methodMatched = findMethod(object.getClass(), name);

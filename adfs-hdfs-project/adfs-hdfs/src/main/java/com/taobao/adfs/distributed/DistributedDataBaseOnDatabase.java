@@ -205,7 +205,7 @@ abstract public class DistributedDataBaseOnDatabase extends DistributedData {
   }
 
   public DistributedData getDataAll(DistributedData data, ReentrantReadWriteLockExtension.WriteLock writeLock)
-      throws IOException {
+      throws Throwable {
     String remoteHost = Utilities.getHost((String) data.getElementToTransfer("distributed.server.name"));
     String remoteDataPath = (String) data.getElementToTransfer("distributed.data.path");
     conf.set("mysql.server.backup.host", Utilities.getHost(remoteHost));
@@ -214,7 +214,7 @@ abstract public class DistributedDataBaseOnDatabase extends DistributedData {
     return data;
   }
 
-  public void setDataAll(DistributedData data) throws IOException {
+  public void setDataAll(DistributedData data) throws Throwable {
     mysql.setData(conf);
   }
 

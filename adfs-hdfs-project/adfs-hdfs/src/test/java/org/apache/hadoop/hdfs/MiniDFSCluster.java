@@ -28,6 +28,7 @@ import java.security.PrivilegedExceptionAction;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Random;
+import java.util.concurrent.ExecutorService;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
@@ -54,9 +55,7 @@ import org.apache.zookeeper.server.ServerConfig;
 import org.apache.zookeeper.server.ZooKeeperServer;
 import org.apache.zookeeper.server.persistence.FileTxnSnapLog;
 import org.apache.zookeeper.server.quorum.QuorumPeerConfig.ConfigException;
-import org.apache.zookeeper.server.quorum.QuorumPeerMain;
 
-import com.mysql.jdbc.log.Log;
 import com.taobao.adfs.util.Utilities;
 
 /**
@@ -309,6 +308,7 @@ public class MiniDFSCluster {
     String mysqlBinPath = "src/main/tool/mysql-" + Utilities.getOsType() + "/bin";
     conf.set("mysql.server.bin.path", mysqlBinPath);
     int replication = conf.getInt("dfs.replication", 3);
+    conf.set("distributed.logger.levels", "org.apache.hadoop.hdfs.StateChange=TRACE,org.apache.hadoop.hdfs.DFSClient=TRACE");
     conf.setInt("dfs.replication", Math.min(replication, numDataNodes));
     conf.setInt("dfs.safemode.extension", 0);
     conf.setInt("dfs.namenode.decommission.interval", 3); // 3 second
@@ -650,7 +650,13 @@ public class MiniDFSCluster {
     for (int i = dataNodes.size()-1; i >= 0; i--) {
       System.out.println("Shutting down DataNode " + i);
       DataNode dn = dataNodes.remove(i).datanode;
-      dn.shutdown();
+/*      try {
+        ((ExecutorService) Utilities.getField(
+            org.apache.hadoop.ipc.Client.class, "SEND_PARAMS_EXECUTOR").get(null)).shutdown();
+      } catch (Throwable t) {
+        t.printStackTrace();
+      }
+*/      dn.shutdown();
       numDataNodes--;
     }
   }

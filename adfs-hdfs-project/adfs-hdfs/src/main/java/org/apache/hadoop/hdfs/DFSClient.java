@@ -122,7 +122,12 @@ public class DFSClient implements FSConstants, java.io.Closeable {
   private static ClientProtocol createRPCNamenode(InetSocketAddress nameNodeAddr,
       Configuration conf, UserGroupInformation ugi) 
     throws IOException {
-    return (ClientProtocol) DistributedClient.getClient(conf);
+    if (conf.getBoolean("distributed.client.enabled", true))
+      return (ClientProtocol) DistributedClient.getClient(conf);
+    else 
+      return (ClientProtocol)RPC.getProxy(ClientProtocol.class,
+        ClientProtocol.versionID, nameNodeAddr, ugi, conf,
+        NetUtils.getSocketFactory(conf, ClientProtocol.class));
   }
 
   private static ClientProtocol createNamenode(ClientProtocol rpcNamenode)
@@ -288,9 +293,11 @@ public class DFSClient implements FSConstants, java.io.Closeable {
         leasechecker.interruptAndJoin();
       } catch (InterruptedException ie) {
       }
-  
+
       // close connections to the namenode
-      DistributedClient.close(rpcNamenode);
+      if (conf.getBoolean("distributed.client.enabled", true))
+        DistributedClient.close(rpcNamenode);
+      else RPC.stopProxy(rpcNamenode);
     }
   }
 

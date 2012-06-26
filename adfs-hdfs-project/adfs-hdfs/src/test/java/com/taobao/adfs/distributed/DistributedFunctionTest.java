@@ -56,7 +56,7 @@ public class DistributedFunctionTest {
   }
 
   @Test
-  public void clusterTest() throws Exception {
+  public void clusterTest() throws Throwable {
     String simpleClassName = getClass().getSimpleName();
     conf1 = new Configuration(false);
     conf1.set("distributed.logger.conf", "target/test" + simpleClassName + "/notExistedLog4j.proproties");

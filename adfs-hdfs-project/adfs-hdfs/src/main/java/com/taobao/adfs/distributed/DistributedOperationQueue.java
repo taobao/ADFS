@@ -34,17 +34,16 @@ public class DistributedOperationQueue {
     if (!allowAdd) return null;
     DistributedOperation[] operations = getOperations(threadId);
     if (operations == null || operations.length == 0) return null;
-    lockBuckets(operations);
-    return getNotWrittenOperations(operations);
+    DistributedOperation[] notWrittedOperations = getNotWrittenOperations(operations);
+    lockBuckets(notWrittedOperations);
+    return notWrittedOperations;
   }
 
-  public synchronized void deleteAndUnlockOperations(long threadId) {
-    DistributedOperation[] operations = getOperations(threadId);
+  public synchronized void deleteAndUnlockOperations(DistributedOperation[] operations) {
     markOperationsAreWritten(operations);
     deleteOperations(operations);
     unlockBuckets(operations);
   }
-
   public synchronized void clear() {
     operationByThreadId.clear();
     operationMapByKey.clear();
@@ -126,6 +125,7 @@ public class DistributedOperationQueue {
     for (OperandKey operationKey : keySet) {
       operationLock.add(operationKey);
     }
+    logger.debug(Thread.currentThread().getName()+" get lock");
   }
 
   /**
@@ -150,6 +150,7 @@ public class DistributedOperationQueue {
     // delete from operationByKey
     for (DistributedOperation operation : operations) {
       operationList = operationMapByKey.get(operation.getKey());
+      if(operationList == null) continue;
       operationList.remove(operation);
       if (operationList.isEmpty()) operationMapByKey.remove(operation.getKey());
     }
@@ -171,9 +172,14 @@ public class DistributedOperationQueue {
    */
   void unlockBuckets(DistributedOperation... operations) {
     if (operations == null) return;
+    Set<OperandKey> keySet = new LinkedHashSet<OperandKey>();
+    for (DistributedOperation operation : operations){
+      keySet.add(operation.getKey());
+     }
     for (DistributedOperation operation : operations) {
       operationLock.remove(operation.getKey());
     }
+    logger.debug(Thread.currentThread().getName()+" release lock");
     notifyAll();
   }
 }
